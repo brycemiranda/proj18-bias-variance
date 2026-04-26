@@ -1,0 +1,12 @@
+.env
+*.pkl
+*.parquet
+__pycache__/
+*.pyc
+.DS_Store
+evidence_*/
+*.egg-info/
+.venv/
+node_modules/
+dist/
+*.log

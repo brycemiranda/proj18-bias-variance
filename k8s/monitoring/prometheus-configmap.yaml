@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/alerts.yml
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
+
+      - job_name: inference-api
+        static_configs:
+          - targets: ['inference-service.mealie-prod.svc.cluster.local:8000']
+        metrics_path: /metrics
+
+      - job_name: inference-api-canary
+        static_configs:
+          - targets: ['inference-canary-service.mealie-prod.svc.cluster.local:8000']
+        metrics_path: /metrics
+  alerts.yml: |
+    groups:
+      - name: platform-alerts
+        rules:
+          - alert: PodCrashLooping
+            expr: increase(kube_pod_container_status_restarts_total[10m]) > 2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod is restarting frequently"
+              description: "Container in pod {{ $labels.namespace }}/{{ $labels.pod }} restarted more than twice in 10 minutes."
+
+          - alert: DeploymentReplicasUnavailable
+            expr: kube_deployment_status_replicas_unavailable > 0
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Deployment has unavailable replicas"
+              description: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas."
+
+          - alert: StatefulSetReplicasUnavailable
+            expr: kube_statefulset_status_replicas_ready < kube_statefulset_status_replicas
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "StatefulSet has unavailable replicas"
+              description: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} is not fully ready."
+
+          - alert: FailedCronJob
+            expr: kube_job_status_failed > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubernetes job failure detected"
+              description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} has failed."
+
+          - alert: HPAAtMaxReplicas
+            expr: kube_horizontalpodautoscaler_status_current_replicas >= kube_horizontalpodautoscaler_spec_max_replicas
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HPA is at max replicas"
+              description: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is running at max replicas."
+
+          - alert: InferenceHighErrorRate
+            expr: rate(http_requests_total{job="inference-api",status=~"5.."}[5m]) / rate(http_requests_total{job="inference-api"}[5m]) > 0.01
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Inference API error rate above 1%"
+              description: "Production inference API 5xx error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+          - alert: InferenceHighLatency
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="inference-api"}[5m])) > 0.5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Inference API p95 latency above 500ms"
+              description: "Production inference p95 latency is {{ $value | humanizeDuration }}."
+
+          - alert: InferenceApiDown
+            expr: up{job="inference-api"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Inference API is unreachable"
+              description: "Prometheus cannot scrape the inference API — pod may be down."
