@@ -22,12 +22,19 @@ spec:
             - name: GF_SECURITY_ADMIN_USER
               value: admin
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: admin123
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-secret
+                  key: admin-password
             - name: GF_PATHS_PROVISIONING
               value: /etc/grafana/provisioning
           volumeMounts:
             - name: datasource
               mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards/mealie
           resources:
             requests:
               cpu: 100m
@@ -39,6 +46,12 @@ spec:
         - name: datasource
           configMap:
             name: grafana-datasource
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
 ---
 apiVersion: v1
 kind: Service

@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: inference-api
-          image: mahimamariah/mealie-serving:latest
+          image: proj18biasvariance/mealie-serving:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           startupProbe:
@@ -64,9 +65,11 @@ spec:
                   name: minio-secret
                   key: secretkey
             - name: MINIO_BUCKET
-              value: mlflow
+              value: mlflow-artifacts
             - name: TAG_VECTOR_KEY
               value: production/tag_to_vector.pkl
+            - name: TAG_VECTOR_CANDIDATES
+              value: production/tag_to_vector.pkl,canary/tag_to_vector.pkl,staging/tag_to_vector.pkl
           resources:
             requests:
               cpu: "250m"
@@ -81,12 +84,13 @@ metadata:
   name: inference-service
   namespace: serving
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: inference-api
   ports:
     - port: 8000
       targetPort: 8000
+      nodePort: 30800
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -107,3 +111,22 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

@@ -5,16 +5,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
-if ! command -v kubectl >/dev/null 2>&1; then
-  echo "Error: kubectl is not installed or not in PATH."
+if command -v kubectl >/dev/null 2>&1; then
+  KUBECTL_BIN=(kubectl)
+elif command -v k3s >/dev/null 2>&1; then
+  KUBECTL_BIN=(sudo k3s kubectl)
+else
+  echo "Error: neither 'kubectl' nor 'k3s' is available."
   exit 1
 fi
+
+kubectl() {
+  "${KUBECTL_BIN[@]}" "$@"
+}
 
 : "${DB_USERNAME:=}"
 : "${DB_PASSWORD:=}"
 : "${MINIO_ACCESS_KEY:=}"
 : "${MINIO_SECRET_KEY:=}"
 : "${GRAFANA_ADMIN_PASSWORD:=}"
+: "${KAGGLE_USERNAME:=}"
+: "${KAGGLE_KEY:=}"
 
 if [ -z "${DB_USERNAME}" ]; then
   read -rp "Enter PostgreSQL username: " DB_USERNAME
@@ -39,7 +49,16 @@ if [ -z "${GRAFANA_ADMIN_PASSWORD}" ]; then
   echo
 fi
 
-if [ -z "${DB_USERNAME}" ] || [ -z "${DB_PASSWORD}" ] || [ -z "${MINIO_ACCESS_KEY}" ] || [ -z "${MINIO_SECRET_KEY}" ] || [ -z "${GRAFANA_ADMIN_PASSWORD}" ]; then
+if [ -z "${KAGGLE_USERNAME}" ]; then
+  read -rp "Enter Kaggle username: " KAGGLE_USERNAME
+fi
+
+if [ -z "${KAGGLE_KEY}" ]; then
+  read -rsp "Enter Kaggle API key: " KAGGLE_KEY
+  echo
+fi
+
+if [ -z "${DB_USERNAME}" ] || [ -z "${DB_PASSWORD}" ] || [ -z "${MINIO_ACCESS_KEY}" ] || [ -z "${MINIO_SECRET_KEY}" ] || [ -z "${GRAFANA_ADMIN_PASSWORD}" ] || [ -z "${KAGGLE_USERNAME}" ] || [ -z "${KAGGLE_KEY}" ]; then
   echo "Error: secret inputs cannot be empty."
   exit 1
 fi
@@ -48,7 +67,7 @@ for ns in platform mealie serving data training monitoring; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
 done
 
-for ns in platform mealie training; do
+for ns in platform mealie data training; do
   cat <<INNER | kubectl apply -f -
 apiVersion: v1
 kind: Secret
@@ -85,6 +104,18 @@ metadata:
 type: Opaque
 stringData:
   admin-password: "${GRAFANA_ADMIN_PASSWORD}"
+INNER
+
+cat <<INNER | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kaggle-secret
+  namespace: data
+type: Opaque
+stringData:
+  username: "${KAGGLE_USERNAME}"
+  key: "${KAGGLE_KEY}"
 INNER
 
 echo "Secrets created/updated successfully."

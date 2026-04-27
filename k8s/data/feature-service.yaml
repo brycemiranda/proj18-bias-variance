@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: feature-service
-          image: mahimamariah/mealie-feature-service:latest
+          image: proj18biasvariance/mealie-feature-service:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 8080
           startupProbe:
@@ -39,10 +40,12 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
           env:
-            - name: FEATURE_BUCKET
-              value: feature-store
             - name: DATA_BUCKET
               value: training-data
+            - name: MINIO_BUCKET
+              value: mlflow-artifacts
+            - name: INFERENCE_API_URL
+              value: http://inference-service.serving.svc.cluster.local:8000
             - name: POSTGRES_HOST
               value: postgres.platform.svc.cluster.local
             - name: POSTGRES_USER
@@ -57,17 +60,17 @@ spec:
                   key: password
             - name: POSTGRES_DB
               value: mealie
-            - name: AWS_ACCESS_KEY_ID
+            - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: accesskey
-            - name: AWS_SECRET_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: secretkey
-            - name: S3_ENDPOINT_URL
+            - name: MINIO_ENDPOINT
               value: http://minio-service.platform.svc.cluster.local:9000
           resources:
             requests:

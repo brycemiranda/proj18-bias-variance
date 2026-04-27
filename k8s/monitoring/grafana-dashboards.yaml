@@ -53,7 +53,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kube_job_status_succeeded{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_job_status_succeeded{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -82,7 +82,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kube_job_status_failed{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_job_status_failed{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -111,7 +111,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"mealie-prod\"}[1h]))",
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"mealie|serving|data|training|platform|monitoring\"}[1h]))",
               "instant": true,
               "refId": "A"
             }
@@ -140,7 +140,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kube_deployment_status_replicas_unavailable{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_deployment_status_replicas_unavailable{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -227,7 +227,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by (namespace) (container_fs_usage_bytes{namespace=\"mealie-prod\",container!=\"\",image!=\"\"})",
+              "expr": "sum by (namespace) (container_fs_usage_bytes{namespace=~\"mealie|serving|data|training|platform|monitoring\",container!=\"\",image!=\"\"})",
               "legendFormat": "{{ namespace }}",
               "refId": "A"
             }
@@ -294,7 +294,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(kube_job_status_active{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_job_status_active{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -309,7 +309,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(kube_job_status_succeeded{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_job_status_succeeded{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -324,7 +324,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(kube_job_status_failed{namespace=\"mealie-prod\"})",
+              "expr": "sum(kube_job_status_failed{namespace=~\"mealie|serving|data|training|platform|monitoring\"})",
               "instant": true,
               "refId": "A"
             }
@@ -339,7 +339,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "clamp_min(time() - max(kube_job_status_start_time{namespace=\"mealie-prod\"}), 0)",
+              "expr": "clamp_min(time() - max(kube_job_status_start_time{namespace=~\"mealie|serving|data|training|platform|monitoring\"}), 0)",
               "instant": true,
               "refId": "A"
             }
@@ -374,7 +374,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "clamp_min(time() - max(kube_job_status_completion_time{namespace=\"mealie-prod\"}), 0)",
+              "expr": "clamp_min(time() - max(kube_job_status_completion_time{namespace=~\"mealie|serving|data|training|platform|monitoring\"}), 0)",
               "instant": true,
               "refId": "A"
             }
@@ -409,7 +409,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(increase(kube_job_status_succeeded{namespace=\"mealie-prod\"}[24h]))",
+              "expr": "sum(increase(kube_job_status_succeeded{namespace=~\"mealie|serving|data|training|platform|monitoring\"}[24h]))",
               "legendFormat": "Succeeded",
               "refId": "A"
             }
@@ -424,7 +424,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(increase(kube_job_status_failed{namespace=\"mealie-prod\"}[24h]))",
+              "expr": "sum(increase(kube_job_status_failed{namespace=~\"mealie|serving|data|training|platform|monitoring\"}[24h]))",
               "legendFormat": "Failed",
               "refId": "A"
             }
@@ -560,7 +560,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "targets": [
             {
-              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"mealie-prod\"}[1h]))",
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"mealie|serving|data|training|platform|monitoring\"}[1h]))",
               "instant": true,
               "refId": "A"
             }

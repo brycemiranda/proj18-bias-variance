@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference-api-canary
-  namespace: mealie-prod
+  namespace: serving
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: inference-api-canary
-          image: mahimamariah/mealie-serving:latest
+          image: proj18biasvariance/mealie-serving:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           startupProbe:
@@ -67,6 +68,8 @@ spec:
               value: mlflow-artifacts
             - name: TAG_VECTOR_KEY
               value: canary/tag_to_vector.pkl
+            - name: TAG_VECTOR_CANDIDATES
+              value: canary/tag_to_vector.pkl,production/tag_to_vector.pkl,staging/tag_to_vector.pkl
           resources:
             requests:
               cpu: "250m"
@@ -79,7 +82,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: inference-canary-service
-  namespace: mealie-prod
+  namespace: serving
 spec:
   type: ClusterIP
   selector:
