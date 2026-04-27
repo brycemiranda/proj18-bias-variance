@@ -26,16 +26,11 @@ spec:
                 secretKeyRef:
                   name: minio-secret
                   key: secretkey
-            - name: KAGGLE_USERNAME
+            - name: KAGGLE_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: kaggle-secret
-                  key: username
-            - name: KAGGLE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: kaggle-secret
-                  key: key
+                  key: token
             - name: FORCE_INGEST
               value: "0"
           resources:
