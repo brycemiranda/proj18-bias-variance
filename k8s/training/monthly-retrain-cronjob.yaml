@@ -12,7 +12,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: monthly-retrain
-              image: shashwatshah02/mealie-als-training:latest
+              image: bm3986/mealie-als-training:latest
               args:
                 - python
                 - train.py
