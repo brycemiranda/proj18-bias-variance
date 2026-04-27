@@ -44,11 +44,11 @@ if [ -z "${DB_USERNAME}" ] || [ -z "${DB_PASSWORD}" ] || [ -z "${MINIO_ACCESS_KE
   exit 1
 fi
 
-for ns in platform mealie serving data training mealie-prod monitoring; do
+for ns in platform mealie serving data training monitoring; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
 done
 
-for ns in platform mealie training mealie-prod; do
+for ns in platform mealie training; do
   cat <<INNER | kubectl apply -f -
 apiVersion: v1
 kind: Secret
@@ -62,7 +62,7 @@ stringData:
 INNER
 done
 
-for ns in platform serving data training mealie-prod; do
+for ns in platform serving data training; do
   cat <<INNER | kubectl apply -f -
 apiVersion: v1
 kind: Secret
