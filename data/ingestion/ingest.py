@@ -38,6 +38,20 @@ def upload(client, df, key):
     client.put_object(Bucket=BUCKET, Key=key, Body=buf.getvalue())
     print(f"  ✓ Uploaded {key}  ({len(df):,} rows)")
 
+def already_ingested(client) -> bool:
+    """Return True if all processed files already exist in MinIO."""
+    keys = [
+        'processed/recipes_clean.parquet',
+        'processed/interactions_clean.parquet',
+        'processed/discovery_recipes.parquet',
+    ]
+    try:
+        for key in keys:
+            client.head_object(Bucket=BUCKET, Key=key)
+        return True
+    except Exception:
+        return False
+
 def download():
     print("Downloading Food.com from Kaggle...")
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -113,17 +127,20 @@ def clean_interactions():
 
 def main():
     client = s3_client()
+    force  = os.environ.get('FORCE_INGEST', '').lower() in ('1', 'true', 'yes')
+
+    if not force and already_ingested(client):
+        print("✓ All processed files already exist in MinIO — skipping Kaggle download.")
+        print("  Set FORCE_INGEST=1 to re-download and reprocess.")
+        return
 
     download()
     recipes      = clean_recipes()
     interactions = clean_interactions()
     discovery    = make_discovery_corpus(recipes)
 
-    # recipes_clean: used by batch (tag join) and nightly_eval
     upload(client, recipes,      'processed/recipes_clean.parquet')
-    # interactions_clean: base for batch.py
     upload(client, interactions, 'processed/interactions_clean.parquet')
-    # discovery_recipes: loaded by feature service at startup for the discovery feed
     upload(client, discovery,    'processed/discovery_recipes.parquet')
 
     print("\n✅ Ingestion complete!")

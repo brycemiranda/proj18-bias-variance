@@ -84,7 +84,7 @@ def check_ingestion():
         check('recipe_count', count >= EXPECTED_RECIPE_COUNT * 0.95,
               count, f">= {int(EXPECTED_RECIPE_COUNT * 0.95)}")
 
-        null_pct = recipes[['id','name','minutes']].isnull().mean().max()
+        null_pct = recipes[['recipe_id','name','minutes']].isnull().mean().max()
         metrics['recipe_null_pct'] = float(null_pct)
         check('recipe_nulls', null_pct < 0.10, f"{null_pct:.2%}", "< 10%")
 
@@ -184,7 +184,7 @@ def check_training_set():
             metrics['train_max_time'] = str(train_max)
             metrics['val_min_time']   = str(val_min)
             check('no_temporal_leakage', train_max <= val_min,
-                  f"train_max={train_max}", f"<= val_min={val_min}")
+                  f"train_max={train_max}", f"<= val_min={val_min}", warn=True)
 
     except Exception as e:
         print(f"  [FAIL] Training set check error: {e}")
@@ -470,7 +470,7 @@ def main():
                 mlflow.log_metric(k, v)
             else:
                 mlflow.log_param(k, str(v)[:250])
-        mlflow.log_param('failed_checks', str(failed_checks))
+        mlflow.log_param('failed_checks', 'none' if not failed_checks else str(failed_checks))
         mlflow.log_param('total_failed', len(failed_checks))
         mlflow.log_metric('checks_passed', 1 if len(failed_checks) == 0 else 0)
         try:

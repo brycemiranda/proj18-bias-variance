@@ -242,6 +242,35 @@ def save_to_minio(obj, bucket, key):
         s3.upload_file(f.name, bucket, key)
     print(f"Saved to MinIO: s3://{bucket}/{key}")
 
+
+# ─── HF HUB BACKUP (disaster recovery — survives Chameleon lease expiration) ───
+def _push_to_hf_hub(tag_to_vector: dict, mappings: dict) -> None:
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        print("HF_TOKEN not set — skipping HF Hub backup")
+        return
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=token)
+        repo_id = os.environ.get("HF_REPO", "proj18biasvariance/mealie-ml-artifacts")
+        api.create_repo(repo_id=repo_id, repo_type="model", private=True, exist_ok=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            pkl_path = os.path.join(tmp, "tag_to_vector.pkl")
+            map_path = os.path.join(tmp, "mappings.json")
+            joblib.dump(tag_to_vector, pkl_path)
+            with open(map_path, "w") as f:
+                json.dump({
+                    "user2idx":   {str(k): v for k, v in mappings["user2idx"].items()},
+                    "recipe2idx": {str(k): v for k, v in mappings["recipe2idx"].items()},
+                }, f)
+            api.upload_file(path_or_fileobj=pkl_path, path_in_repo="tag_to_vector.pkl",
+                            repo_id=repo_id, repo_type="model")
+            api.upload_file(path_or_fileobj=map_path, path_in_repo="mappings.json",
+                            repo_id=repo_id, repo_type="model")
+        print(f"✓ Artifacts backed up to HF Hub: {repo_id}")
+    except Exception as exc:
+        print(f"HF Hub backup failed (non-fatal): {exc}")
+
 # ─── MAIN TRAINING FUNCTION ───
 def train():
     mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
@@ -299,14 +328,9 @@ def train():
         print(f"NDCG@10: {ndcg_at_10:.4f}")
         
         # ─── QUALITY GATE ───
-        # NDCG@10 is logged for tracking but is expected to be near 0.0 for
-        # implicit feedback ALS evaluated on held-out interactions from 53k recipes.
-        # The practical quality gate uses training_time and n_train_interactions
-        # as proxies for a valid training run.
-        # As production data grows, we will switch to NDCG threshold > 0.
-        MIN_INTERACTIONS = 100000  # Must have meaningful data to register
-        gate_passed = train_matrix.nnz >= MIN_INTERACTIONS
-        print(f"Quality gate: n_train_interactions {train_matrix.nnz:,} >= {MIN_INTERACTIONS:,}? {gate_passed}")
+        NDCG_THRESHOLD = 0.01
+        gate_passed = ndcg_at_10 >= NDCG_THRESHOLD
+        print(f"Quality gate: NDCG@10 {ndcg_at_10:.4f} >= {NDCG_THRESHOLD}? {gate_passed}")
         
         if gate_passed:
             print("✅ Quality gate PASSED — registering model")
@@ -317,6 +341,7 @@ def train():
             
             # Save tag_to_vector to MinIO for Sharvin
             save_to_minio(tag_to_vector, os.environ.get('MINIO_BUCKET', 'mlflow-artifacts'), 'staging/tag_to_vector.pkl')
+            _push_to_hf_hub(tag_to_vector, mappings)
             
             # Save model artifacts
             os.makedirs('/tmp/model_artifacts', exist_ok=True)
@@ -355,7 +380,7 @@ def train():
             print(f"Model registered and promoted to Production: version {model_version.version}")
             
         else:
-            print(f"❌ Quality gate FAILED — insufficient training data ({train_matrix.nnz:,} < {MIN_INTERACTIONS:,})")
+            print(f"❌ Quality gate FAILED — NDCG@10 ({ndcg_at_10:.4f}) below threshold ({NDCG_THRESHOLD})")
             mlflow.log_param("quality_gate_passed", False)
         
         print("Run complete.")

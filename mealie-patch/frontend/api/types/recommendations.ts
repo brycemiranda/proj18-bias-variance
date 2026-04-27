@@ -30,3 +30,37 @@ export interface RecommendationResult {
   coldStart: boolean;
   modelVersion: string;
 }
+
+export interface DiscoveryItem {
+  recipeId: string;
+  name: string;
+  description?: string;
+  category: string;
+  tags?: string[];
+  ingredients?: string[];
+  steps?: string[];
+  score?: number;
+}
+
+export interface DiscoveryResult {
+  items: DiscoveryItem[];
+  page: number;
+  total: number;
+  coldStart: boolean;
+}
+
+export interface AutoTagIn {
+  ingredients: string[];
+}
+
+export interface AutoTagResult {
+  categories: string[];
+  tags: string[];
+  confidence: number;
+}
+
+export interface DiscoveryRatingIn {
+  recipeId: string;
+  tags: string[];
+  rating: number;
+}

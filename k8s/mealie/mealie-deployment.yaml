@@ -81,6 +81,8 @@ spec:
               value: "http://inference-service.serving.svc.cluster.local:8000"
             - name: RECIPE_RECOMMENDER_URL
               value: "http://inference-service.serving.svc.cluster.local:8000"
+            - name: FEATURE_SERVICE_URL
+              value: "http://feature-service.data.svc.cluster.local:8080"
           volumeMounts:
             - name: mealie-data
               mountPath: /app/data

@@ -38,3 +38,37 @@ class RecommendationResult(MealieModel):
     recommendations: list[RecommendationItem]
     cold_start: bool
     model_version: str
+
+
+class DiscoveryItem(MealieModel):
+    recipe_id: str
+    name: str
+    description: str = ""
+    category: str
+    tags: list[str] = Field(default_factory=list)
+    ingredients: list[str] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
+    score: float = 0.0
+
+
+class DiscoveryResult(MealieModel):
+    items: list[DiscoveryItem]
+    page: int
+    total: int
+    cold_start: bool
+
+
+class AutoTagIn(MealieModel):
+    ingredients: list[str]
+
+
+class AutoTagResult(MealieModel):
+    categories: list[str]
+    tags: list[str]
+    confidence: float
+
+
+class DiscoveryRatingIn(MealieModel):
+    recipe_id: str
+    tags: list[str] = Field(default_factory=list)
+    rating: int

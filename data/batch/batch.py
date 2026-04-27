@@ -142,7 +142,7 @@ def main():
 
     # Get Food.com base
     foodcom = fetch_foodcom_base()
-    foodcom['timestamp'] = pd.to_datetime('2020-01-01')
+    foodcom['timestamp'] = pd.to_datetime(foodcom['date'])
 
     # Combine
     combined = pd.concat([foodcom, prod], ignore_index=True)

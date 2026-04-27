@@ -1,172 +1,283 @@
 <template>
-  <section
-    v-if="!loading"
-    class="recommendations-section"
-  >
-    <template v-if="recommendations.length">
-      <div class="d-flex flex-column flex-md-row align-md-center justify-space-between ga-3 mb-4">
-        <div>
-          <div class="text-h6 font-weight-medium">
-            Recommended for You
-          </div>
-          <div class="text-body-2 text-medium-emphasis">
-            Suggestions update as you rate and dismiss recipes.
-          </div>
+  <section class="recommendations-section">
+    <div class="d-flex flex-column flex-md-row align-md-center justify-space-between ga-3 mb-3">
+      <div>
+        <div class="text-h6 font-weight-medium">
+          Recommended for You
         </div>
-        <v-chip
-          v-if="coldStart"
+        <div class="text-body-2 text-medium-emphasis">
+          Personalized picks from thousands of Food.com recipes.
+        </div>
+      </div>
+      <v-btn
+        variant="tonal"
+        size="small"
+        prepend-icon="mdi-tune"
+        @click="showGenrePicker = true"
+      >
+        Change Preferences
+      </v-btn>
+    </div>
+
+    <v-tabs
+      v-model="activeTab"
+      density="compact"
+      class="mb-4"
+    >
+      <v-tab value="foryou">
+        For You
+      </v-tab>
+      <v-tab value="favorites">
+        Favorites
+      </v-tab>
+    </v-tabs>
+
+    <!-- For You tab -->
+    <template v-if="activeTab === 'foryou'">
+      <div
+        v-if="loading"
+        class="d-flex justify-center pa-8"
+      >
+        <v-progress-circular
+          indeterminate
           color="primary"
-          variant="tonal"
-          size="small"
-        >
-          Rate recipes to personalize this list
-        </v-chip>
+        />
       </div>
 
-      <div class="recommendation-strip">
-        <v-card
-          v-for="recipe in recommendations"
-          :key="recipe.recipeId"
-          class="recommendation-card"
-          variant="outlined"
-        >
-          <div class="recommendation-image">
-            <v-img
-              v-if="recipe.recipeId"
-              :src="staticRoutes.recipeSmallImage(recipe.recipeId, recipe.image || '', imageKey)"
-              cover
-              height="160"
-            />
-            <div
-              v-else
-              class="recommendation-placeholder"
-            >
-              <v-icon size="40">
+      <template v-else-if="discoveryItems.length">
+        <div class="discovery-grid">
+          <v-card
+            v-for="item in discoveryItems"
+            :key="item.recipeId"
+            class="discovery-card"
+            variant="outlined"
+            @click="openDetail(item)"
+          >
+            <div class="discovery-placeholder">
+              <v-icon
+                size="36"
+                color="medium-emphasis"
+              >
                 mdi-silverware-fork-knife
               </v-icon>
             </div>
-          </div>
-
-          <v-card-text class="pb-3">
-            <div class="text-subtitle-1 font-weight-medium recommendation-title">
-              {{ recipe.name }}
-            </div>
-            <p class="text-body-2 text-medium-emphasis recommendation-description">
-              {{ recipe.description || "Fresh picks from your recipe library." }}
-            </p>
-
-            <div
-              v-if="recipe.becauseTags?.length"
-              class="d-flex flex-wrap ga-1 mt-3"
-            >
+            <v-card-text class="pb-2">
+              <div class="text-subtitle-2 font-weight-medium discovery-title">
+                {{ item.name }}
+              </div>
               <v-chip
-                v-for="tag in recipe.becauseTags.slice(0, 3)"
-                :key="`${recipe.recipeId}-${tag}`"
                 size="x-small"
-                variant="outlined"
+                color="primary"
+                variant="tonal"
+                class="mt-1 mb-2"
               >
-                {{ tag }}
+                {{ item.category }}
               </v-chip>
-            </div>
+              <div class="d-flex flex-wrap ga-1">
+                <v-chip
+                  v-for="tag in (item.tags ?? []).slice(0, 3)"
+                  :key="tag"
+                  size="x-small"
+                  variant="outlined"
+                >
+                  {{ tag }}
+                </v-chip>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
 
-            <div
-              v-if="recipe.score !== null && recipe.score !== undefined"
-              class="text-caption text-medium-emphasis mt-3"
-            >
-              Match score {{ recipe.score.toFixed(2) }}
-            </div>
-          </v-card-text>
+        <div
+          v-if="hasMore"
+          class="d-flex justify-center mt-4"
+        >
+          <v-btn
+            variant="tonal"
+            :loading="loadingMore"
+            @click="loadMore"
+          >
+            Load more
+          </v-btn>
+        </div>
+      </template>
 
-          <v-card-actions class="px-4 pb-4 pt-0">
-            <v-btn
-              color="primary"
-              variant="text"
-              @click="openRecipe(recipe.slug)"
-            >
-              View
-            </v-btn>
-            <v-spacer />
-            <v-btn
-              variant="text"
-              color="default"
-              @click="dismissRecipe(recipe.recipeId)"
-            >
-              Dismiss
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </div>
+      <v-card
+        v-else
+        variant="outlined"
+        class="recommendation-empty"
+      >
+        <v-card-text class="pa-6">
+          <div class="text-h6 font-weight-medium mb-2">
+            No recipes yet
+          </div>
+          <p class="text-body-2 text-medium-emphasis mb-3">
+            Select some food preferences to start your discovery feed.
+          </p>
+          <v-btn
+            color="primary"
+            variant="flat"
+            @click="showGenrePicker = true"
+          >
+            Set Preferences
+          </v-btn>
+        </v-card-text>
+      </v-card>
     </template>
 
-    <v-card
-      v-else
-      class="recommendation-empty"
-      variant="outlined"
-    >
-      <v-card-text class="pa-6 pa-md-8">
-        <div class="text-h6 font-weight-medium mb-2">
-          Recommendations will appear after you add recipes
+    <!-- Favorites tab -->
+    <template v-else>
+      <template v-if="favorites.length">
+        <div class="discovery-grid">
+          <v-card
+            v-for="item in favorites"
+            :key="item.recipeId"
+            class="discovery-card"
+            variant="outlined"
+            @click="openDetail(item)"
+          >
+            <div class="discovery-placeholder">
+              <v-icon
+                size="36"
+                color="amber"
+              >
+                mdi-star
+              </v-icon>
+            </div>
+            <v-card-text class="pb-2">
+              <div class="text-subtitle-2 font-weight-medium discovery-title">
+                {{ item.name }}
+              </div>
+              <v-chip
+                size="x-small"
+                color="primary"
+                variant="tonal"
+                class="mt-1"
+              >
+                {{ item.category }}
+              </v-chip>
+            </v-card-text>
+          </v-card>
         </div>
-        <p class="text-body-2 text-medium-emphasis mb-0">
-          Your taste profile was saved, but this household does not have any recipes in its library yet. Add or import a few recipes first, then Mealie can rank them for you.
-        </p>
-      </v-card-text>
-    </v-card>
+      </template>
+      <v-card
+        v-else
+        variant="outlined"
+        class="recommendation-empty"
+      >
+        <v-card-text class="pa-6">
+          <div class="text-body-2 text-medium-emphasis">
+            Recipes you rate 4+ stars will appear here.
+          </div>
+        </v-card-text>
+      </v-card>
+    </template>
+
+    <GenrePicker
+      v-model="showGenrePicker"
+      :initial="currentCategories"
+      @saved="onPreferencesSaved"
+    />
+
+    <RecipeDetailModal
+      v-model="showDetail"
+      :recipe="selectedRecipe"
+      @rated="onRated"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import type { RecommendationItem } from "~/lib/api/types/recommendations";
+import type { DiscoveryItem } from "~/lib/api/types/recommendations";
 import { useUserApi } from "~/composables/api";
-import { useStaticRoutes } from "~/composables/api/static-routes";
+import GenrePicker from "./GenrePicker.vue";
+import RecipeDetailModal from "./RecipeDetailModal.vue";
 
 const auth = useMealieAuth();
 const api = useUserApi();
-const route = useRoute();
-const staticRoutes = useStaticRoutes();
 
-const recommendations = ref<RecommendationItem[]>([]);
-const coldStart = ref(false);
+const FAV_KEY = "ml_favorites";
+const PAGE_SIZE = 20;
+
+const activeTab = ref("foryou");
 const loading = ref(true);
-const imageKey = ref(Date.now());
+const loadingMore = ref(false);
+const discoveryItems = ref<DiscoveryItem[]>([]);
+const page = ref(1);
+const totalItems = ref(0);
+const showGenrePicker = ref(false);
+const showDetail = ref(false);
+const selectedRecipe = ref<DiscoveryItem | null>(null);
+const currentCategories = ref<string[]>([]);
+const favorites = ref<DiscoveryItem[]>(
+  JSON.parse(typeof localStorage !== "undefined" ? (localStorage.getItem(FAV_KEY) ?? "[]") : "[]")
+);
 
-async function loadRecommendations() {
+const hasMore = computed(() => discoveryItems.value.length < totalItems.value);
+
+async function loadDiscovery(reset = false) {
+  if (reset) {
+    page.value = 1;
+    discoveryItems.value = [];
+  }
+  try {
+    const res = await api.recommendations.getDiscovery({ page: page.value, pageSize: PAGE_SIZE });
+    if (!res.data) return;
+    if (res.data.coldStart && page.value === 1) {
+      showGenrePicker.value = true;
+    }
+    discoveryItems.value = reset ? res.data.items : [...discoveryItems.value, ...res.data.items];
+    totalItems.value = res.data.total;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadMore() {
+  loadingMore.value = true;
+  page.value++;
+  try {
+    await loadDiscovery();
+  } finally {
+    loadingMore.value = false;
+  }
+}
+
+function openDetail(item: DiscoveryItem) {
+  selectedRecipe.value = item;
+  showDetail.value = true;
+}
+
+function onPreferencesSaved(categories: string[]) {
+  currentCategories.value = categories;
+  loading.value = true;
+  loadDiscovery(true);
+}
+
+function onRated(recipeId: string, stars: number) {
+  if (stars >= 4) {
+    const item = discoveryItems.value.find((i) => i.recipeId === recipeId);
+    if (item && !favorites.value.find((f) => f.recipeId === recipeId)) {
+      favorites.value = [...favorites.value, item];
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(FAV_KEY, JSON.stringify(favorites.value));
+      }
+    }
+  }
+}
+
+onMounted(async () => {
   if (!auth.user.value) {
     loading.value = false;
     return;
   }
-
-  try {
-    const status = await api.recommendations.getStatus();
-    if (status.data?.needsOnboarding) {
-      await navigateTo("/preferences");
-      return;
-    }
-
-    const response = await api.recommendations.getRecommendations();
-    recommendations.value = response.data?.recommendations ?? [];
-    coldStart.value = response.data?.coldStart ?? false;
-  }
-  finally {
+  const status = await api.recommendations.getStatus();
+  if (status.data?.needsOnboarding) {
+    showGenrePicker.value = true;
     loading.value = false;
-  }
-}
-
-function openRecipe(slug?: string | null) {
-  const routeGroupSlug = typeof route.params.groupSlug === "string" ? route.params.groupSlug : null;
-  const groupSlug = routeGroupSlug || auth.user.value?.groupSlug;
-  if (!groupSlug || !slug) {
     return;
   }
-  navigateTo(`/g/${groupSlug}/r/${slug}`);
-}
-
-async function dismissRecipe(recipeId: string) {
-  recommendations.value = recommendations.value.filter(recipe => recipe.recipeId !== recipeId);
-  await api.recommendations.dismiss({ recipeId });
-}
-
-onMounted(loadRecommendations);
+  await loadDiscovery(true);
+});
 </script>
 
 <style scoped>
@@ -178,41 +289,32 @@ onMounted(loadRecommendations);
   border-style: dashed;
 }
 
-.recommendation-strip {
+.discovery-grid {
   display: grid;
   gap: 1rem;
-  grid-auto-columns: minmax(260px, 320px);
-  grid-auto-flow: column;
-  overflow-x: auto;
-  padding-bottom: 0.5rem;
-  scroll-snap-type: x proximity;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 }
 
-.recommendation-card {
-  scroll-snap-align: start;
+.discovery-card {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
 }
 
-.recommendation-image {
-  min-height: 160px;
-  background: linear-gradient(135deg, rgba(32, 52, 84, 0.12), rgba(54, 122, 98, 0.16));
+.discovery-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
-.recommendation-placeholder {
+.discovery-placeholder {
   align-items: center;
-  color: rgba(0, 0, 0, 0.45);
+  background: linear-gradient(135deg, rgba(32, 52, 84, 0.08), rgba(54, 122, 98, 0.12));
   display: flex;
-  height: 160px;
+  height: 120px;
   justify-content: center;
 }
 
-.recommendation-title {
-  line-height: 1.35;
-}
-
-.recommendation-description {
+.discovery-title {
   display: -webkit-box;
-  margin-top: 0.5rem;
-  min-height: 3.25rem;
+  line-height: 1.35;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

@@ -11,6 +11,10 @@ COPY backend/alembic/2026-04-17-05.30.00_c1f7f0d9a9a1_add_user_ml_preferences.py
 # Frontend: recommendation component + page integration + API client
 COPY frontend/components/AppRecommendedForYou.vue \
      /app/frontend/app/components/AppRecommendedForYou.vue
+COPY frontend/components/GenrePicker.vue \
+     /app/frontend/app/components/GenrePicker.vue
+COPY frontend/components/RecipeDetailModal.vue \
+     /app/frontend/app/components/RecipeDetailModal.vue
 COPY frontend/components/Domain/Recipe/RecipeExplorerPage/RecipeExplorerPage.vue \
      /app/frontend/app/components/Domain/Recipe/RecipeExplorerPage/RecipeExplorerPage.vue
 COPY frontend/api/types/recommendations.ts \

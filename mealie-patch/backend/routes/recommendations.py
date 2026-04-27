@@ -1,4 +1,4 @@
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -6,6 +6,10 @@ from mealie.db.models.recipe.recipe import RecipeModel
 from mealie.routes._base import BaseUserController, controller
 from mealie.routes._base.routers import UserAPIRouter
 from mealie.schema.recommendations import (
+    AutoTagIn,
+    AutoTagResult,
+    DiscoveryResult,
+    DiscoveryRatingIn,
     RecommendationAck,
     RecommendationDismissIn,
     RecommendationPreferencesIn,
@@ -13,6 +17,9 @@ from mealie.schema.recommendations import (
     RecommendationStatus,
 )
 from mealie.services.recommendation_service import (
+    call_auto_tag,
+    expand_categories_to_tags,
+    fetch_discovery,
     fetch_recommendations,
     fetch_tag_vector,
     get_or_create_prefs,
@@ -51,7 +58,9 @@ class RecommendationController(BaseUserController):
     def set_preferences(self, body: RecommendationPreferencesIn):
         prefs = get_or_create_prefs(self.session, self.user.id)
         prefs.onboarding_tags = list(dict.fromkeys(tag.strip() for tag in body.tags if tag.strip()))
-        prefs.taste_vector = fetch_tag_vector(prefs.onboarding_tags)
+        # Expand category names (e.g. "Italian") to Food.com tag keywords before vectorizing
+        expanded = expand_categories_to_tags(prefs.onboarding_tags)
+        prefs.taste_vector = fetch_tag_vector(expanded)
         self.session.commit()
         return RecommendationAck()
 
@@ -59,6 +68,21 @@ class RecommendationController(BaseUserController):
     async def get_recommendations(self):
         recipes = self._get_group_recipes()
         return RecommendationResult(**await fetch_recommendations(self.session, self.user.id, recipes))
+
+    @router.get("/discovery", response_model=DiscoveryResult)
+    def get_discovery(
+        self,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=50),
+        category: str | None = Query(None),
+    ):
+        data = fetch_discovery(str(self.user.id), page=page, category=category, page_size=page_size)
+        return DiscoveryResult(**data)
+
+    @router.post("/auto-tag", response_model=AutoTagResult)
+    def get_auto_tag(self, body: AutoTagIn):
+        data = call_auto_tag(body.ingredients)
+        return AutoTagResult(**data)
 
     @router.post("/dismiss", response_model=RecommendationAck)
     def dismiss(self, body: RecommendationDismissIn, background_tasks: BackgroundTasks):
@@ -81,4 +105,14 @@ class RecommendationController(BaseUserController):
                 [tag.name for tag in recipe.tags],
                 2,
             )
+        return RecommendationAck()
+
+    @router.post("/rate", response_model=RecommendationAck)
+    def rate_discovery(self, body: DiscoveryRatingIn, background_tasks: BackgroundTasks):
+        background_tasks.add_task(
+            update_vector_on_rating,
+            self.user.id,
+            body.tags,
+            body.rating,
+        )
         return RecommendationAck()

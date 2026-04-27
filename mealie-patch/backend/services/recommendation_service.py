@@ -17,10 +17,68 @@ from mealie.services.observability_metrics import record_recommendation_error, r
 log = logging.getLogger(__name__)
 
 INFERENCE_URL = os.getenv("INFERENCE_API_URL", "http://inference-api:8000")
+FEATURE_SERVICE_URL = os.getenv("FEATURE_SERVICE_URL", "http://feature-service.data.svc.cluster.local:8080")
 LEARNING_RATE = 0.1
 COLD_START_THRESHOLD = 5
 REQUEST_TIMEOUT = 2.0
 RATING_WEIGHTS: dict[int, float] = {5: 1.0, 4: 0.7, 3: 0.0, 2: -0.5, 1: -1.0}
+
+# Must match ingest.py CATEGORIES
+CATEGORY_TAGS: dict[str, list[str]] = {
+    "Italian":    ["italian-american", "pasta", "pizza", "lasagna", "italian"],
+    "American":   ["american", "southern-united-states", "comfort-food", "north-american"],
+    "Indian":     ["indian", "south-asian", "middle-eastern"],
+    "Chinese":    ["chinese", "japanese", "thai", "korean", "asian"],
+    "Mexican":    ["mexican", "tex-mex", "latin-american", "southwestern-united-states"],
+    "Vegetarian": ["vegetarian", "vegan", "healthy"],
+    "Desserts":   ["desserts", "cookies-and-brownies", "cakes", "pies-and-tarts", "candy"],
+}
+
+
+def expand_categories_to_tags(inputs: Iterable[str]) -> list[str]:
+    """Expand category display names to Food.com tag keywords; pass raw tags through."""
+    out: list[str] = []
+    for item in inputs:
+        item = item.strip()
+        if not item:
+            continue
+        keywords = CATEGORY_TAGS.get(item)
+        if keywords:
+            out.extend(keywords)
+        else:
+            out.append(item)
+    return list(dict.fromkeys(out))
+
+
+def fetch_discovery(user_id: str, page: int = 1, category: str | None = None, page_size: int = 20) -> dict:
+    params: dict = {"user_id": user_id, "page": page, "page_size": page_size}
+    if category:
+        params["category"] = category
+    try:
+        response = httpx.get(
+            f"{FEATURE_SERVICE_URL}/discovery",
+            params=params,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        log.error("discovery fetch failed for %s: %s", user_id, exc)
+        return {"items": [], "page": page, "total": 0, "cold_start": True}
+
+
+def call_auto_tag(ingredients: list[str]) -> dict:
+    try:
+        response = httpx.post(
+            f"{FEATURE_SERVICE_URL}/auto-tag",
+            json={"ingredients": ingredients},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        log.error("auto-tag request failed: %s", exc)
+        return {"categories": [], "tags": [], "confidence": 0.0}
 
 
 def get_prefs(db: Session, user_id: Any) -> UserMLPreferences | None:

@@ -86,6 +86,27 @@ def s3():
     )
 
 
+def _restore_from_hf_hub() -> dict:
+    token = os.environ.get("HF_TOKEN")
+    repo_id = os.environ.get("HF_REPO", "proj18biasvariance/mealie-ml-artifacts")
+    if not token:
+        log.warning("HF_TOKEN not set — discovery ranking disabled")
+        return {}
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(repo_id=repo_id, filename="tag_to_vector.pkl", token=token)
+        vec = joblib.load(path)
+        buf = BytesIO()
+        joblib.dump(vec, buf)
+        buf.seek(0)
+        s3().put_object(Bucket=MINIO_BUCKET, Key="production/tag_to_vector.pkl", Body=buf.read())
+        log.info("✓ Restored tag_to_vector.pkl from HF Hub → seeded MinIO production/")
+        return vec
+    except Exception as exc:
+        log.warning("HF Hub restore failed: %s — discovery ranking disabled", exc)
+        return {}
+
+
 def _recipe_embedding(tags: list, tag_to_vec: dict) -> np.ndarray:
     vecs = [tag_to_vec[t] for t in tags if t in tag_to_vec]
     if not vecs:
@@ -102,8 +123,8 @@ def load_discovery_corpus():
         _tag_to_vec = joblib.load(BytesIO(obj['Body'].read()))
         log.info(f"  ✓ {len(_tag_to_vec)} tags loaded")
     except Exception as e:
-        log.warning(f"tag_to_vector.pkl not found ({e}) — discovery ranking disabled")
-        _tag_to_vec = {}
+        log.warning(f"tag_to_vector.pkl not in MinIO ({e}) — trying HF Hub restore...")
+        _tag_to_vec = _restore_from_hf_hub()
 
     log.info("Loading discovery_recipes.parquet from MinIO...")
     try:
