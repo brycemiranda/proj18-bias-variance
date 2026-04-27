@@ -1,4 +1,4 @@
-﻿from typing import Dict, Iterable, List, MutableMapping, Optional
+from typing import Dict, Iterable, List, MutableMapping, Optional
 
 import numpy as np
 
@@ -9,35 +9,54 @@ CUISINE_TAGS = {
 }
 
 
+def _resolve_vector_dim(
+    tag_to_vector: Dict[str, np.ndarray],
+    vector_dim: Optional[int],
+) -> int:
+    if vector_dim is not None:
+        return int(vector_dim)
+    if tag_to_vector:
+        first_vector = next(iter(tag_to_vector.values()))
+        return int(np.asarray(first_vector).shape[0])
+    return DEFAULT_VECTOR_DIM
+
+
 def get_recipe_vector(
     tags: Iterable[str],
     tag_to_vector: Dict[str, np.ndarray],
-    vector_dim: int = DEFAULT_VECTOR_DIM,
+    vector_dim: Optional[int] = None,
 ) -> np.ndarray:
+    resolved_dim = _resolve_vector_dim(tag_to_vector, vector_dim)
     vecs = [tag_to_vector[tag] for tag in tags if tag in tag_to_vector]
     if not vecs:
-        return np.zeros(vector_dim, dtype=np.float32)
+        return np.zeros(resolved_dim, dtype=np.float32)
     return np.mean(np.stack(vecs), axis=0).astype(np.float32)
 
 
 def precompute_recipe_cache(
     library_recipes: List[Dict],
     tag_to_vector: Dict[str, np.ndarray],
-    vector_dim: int = DEFAULT_VECTOR_DIM,
+    vector_dim: Optional[int] = None,
 ) -> Dict[str, np.ndarray]:
     cache: Dict[str, np.ndarray] = {}
+    resolved_dim = _resolve_vector_dim(tag_to_vector, vector_dim)
     for recipe in library_recipes:
         recipe_id = recipe.get("recipe_id")
         if recipe_id:
             cache[recipe_id] = get_recipe_vector(
                 recipe.get("tags", []),
                 tag_to_vector,
-                vector_dim=vector_dim,
+                vector_dim=resolved_dim,
             )
     return cache
 
 
-def apply_diversity(ranked: List[Dict], max_per_cuisine: int = 3) -> List[Dict]:
+def apply_diversity(
+    ranked: List[Dict],
+    *,
+    limit: Optional[int] = None,
+    max_per_cuisine: int = 3,
+) -> List[Dict]:
     counts: Dict[str, int] = {}
     kept: List[Dict] = []
     rest: List[Dict] = []
@@ -52,7 +71,8 @@ def apply_diversity(ranked: List[Dict], max_per_cuisine: int = 3) -> List[Dict]:
             counts[cuisine] = counts.get(cuisine, 0) + 1
         kept.append(recipe)
 
-    return (kept + rest)[:10]
+    diversified = kept + rest
+    return diversified[:limit] if limit is not None else diversified
 
 
 def rank_recipes(
@@ -94,5 +114,8 @@ def rank_recipes(
         )
 
     scored.sort(key=lambda item: item["score"], reverse=True)
-    diversified = apply_diversity(scored[: max(top_n * 2, 20)])
-    return [{"rank": idx + 1, **recipe} for idx, recipe in enumerate(diversified[:top_n])]
+    diversified = apply_diversity(
+        scored[: max(top_n * 2, 20)],
+        limit=top_n,
+    )
+    return [{"rank": idx + 1, **recipe} for idx, recipe in enumerate(diversified)]
