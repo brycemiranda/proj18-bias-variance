@@ -41,12 +41,29 @@ def fetch_foodcom_base():
     print("Loading Food.com base interactions from object storage...")
     obj = s3().get_object(Bucket=BUCKET,
                           Key='processed/interactions_clean.parquet')
-    df = pd.read_parquet(BytesIO(obj['Body'].read()))
-    df['source'] = 'foodcom'
-    df['user_id'] = df['user_id'].astype(str)
-    df['recipe_id'] = df['recipe_id'].astype(str)
-    print(f"  ✓ {len(df):,} Food.com interactions loaded")
-    return df
+    interactions = pd.read_parquet(BytesIO(obj['Body'].read()))
+    interactions['source']    = 'foodcom'
+    interactions['user_id']   = interactions['user_id'].astype(str)
+    interactions['recipe_id'] = interactions['recipe_id'].astype(str)
+
+    # Join tags from recipes_clean so nightly_eval can compute per-tier NDCG
+    print("  Joining recipe tags onto interactions...")
+    try:
+        obj_r = s3().get_object(Bucket=BUCKET, Key='processed/recipes_clean.parquet')
+        recipes = pd.read_parquet(BytesIO(obj_r['Body'].read()),
+                                  columns=['recipe_id', 'tags'])
+        recipes['recipe_id'] = recipes['recipe_id'].astype(str)
+        interactions = interactions.merge(recipes, on='recipe_id', how='left')
+        interactions['tags'] = interactions['tags'].apply(
+            lambda t: t if isinstance(t, list) else []
+        )
+        print(f"  ✓ Tags joined ({interactions['tags'].apply(len).mean():.1f} tags/interaction avg)")
+    except Exception as e:
+        print(f"  [WARN] Could not join tags: {e} — tags column will be missing")
+        interactions['tags'] = [[] for _ in range(len(interactions))]
+
+    print(f"  ✓ {len(interactions):,} Food.com interactions loaded")
+    return interactions
 
 def candidate_selection(df):
     print("Applying candidate selection...")

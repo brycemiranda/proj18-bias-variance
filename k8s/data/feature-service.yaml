@@ -18,31 +18,31 @@ spec:
           image: mahimamariah/mealie-feature-service:latest
           ports:
             - containerPort: 8080
+          # Startup probe is generous — corpus loading takes ~30s on first boot
           startupProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
-            failureThreshold: 30
+            failureThreshold: 60
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 2
+            periodSeconds: 15
+            timeoutSeconds: 5
             failureThreshold: 6
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 20
-            timeoutSeconds: 2
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: FEATURE_BUCKET
-              value: feature-store
-            - name: DATA_BUCKET
-              value: training-data
             - name: POSTGRES_HOST
               value: postgres.platform.svc.cluster.local
             - name: POSTGRES_USER
@@ -54,30 +54,34 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
-                  key: password
+                  key: secretkey
             - name: POSTGRES_DB
               value: mealie
-            - name: AWS_ACCESS_KEY_ID
+            - name: MINIO_ENDPOINT
+              value: "http://minio-service.platform.svc.cluster.local:9000"
+            - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: accesskey
-            - name: AWS_SECRET_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: secretkey
-            - name: S3_ENDPOINT_URL
-              value: http://minio-service.platform.svc.cluster.local:9000
+            - name: MINIO_BUCKET
+              value: "mlflow-artifacts"
+            - name: DATA_BUCKET
+              value: "training-data"
             - name: INFERENCE_API_URL
               value: "http://inference-service.serving.svc.cluster.local:8000"
           resources:
             requests:
-              cpu: "50m"
-              memory: "128Mi"
+              cpu: "100m"
+              memory: "512Mi"
             limits:
-              cpu: "250m"
-              memory: "256Mi"
+              cpu: "500m"
+              memory: "1Gi"
 ---
 apiVersion: v1
 kind: Service
