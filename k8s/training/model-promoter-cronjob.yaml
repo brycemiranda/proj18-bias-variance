@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: model-promoter
-  namespace: mealie-prod
+  namespace: training
 spec:
   schedule: "0 */6 * * *"
   successfulJobsHistoryLimit: 3
