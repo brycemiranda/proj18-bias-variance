@@ -56,12 +56,12 @@ data:
 
       - job_name: mealie-api
         static_configs:
-          - targets: ['mealie.mealie-prod.svc.cluster.local:9000']
+          - targets: ['mealie.mealie.svc.cluster.local:9000']
         metrics_path: /api/metrics
 
       - job_name: inference-api
         static_configs:
-          - targets: ['inference-api.mealie-prod.svc.cluster.local:8000']
+          - targets: ['inference-api.serving.svc.cluster.local:8000']
         metrics_path: /metrics
 
       - job_name: mlflow
@@ -152,7 +152,7 @@ data:
               severity: critical
             annotations:
               summary: "Inference API is unreachable"
-              description: "Prometheus cannot scrape the inference API in mealie-prod."
+              description: "Prometheus cannot scrape the inference API in the serving namespace."
 
           - alert: MealieAPIDown
             expr: up{job="mealie-api"} == 0
@@ -161,7 +161,7 @@ data:
               severity: critical
             annotations:
               summary: "Mealie API is unreachable"
-              description: "Prometheus cannot scrape the Mealie API in mealie-prod."
+              description: "Prometheus cannot scrape the Mealie API in the mealie namespace."
 
           - alert: MLflowDown
             expr: probe_success{job="mlflow"} == 0

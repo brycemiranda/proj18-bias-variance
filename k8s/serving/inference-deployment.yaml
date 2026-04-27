@@ -64,7 +64,7 @@ spec:
                   name: minio-secret
                   key: secretkey
             - name: MINIO_BUCKET
-              value: mlflow
+              value: mlflow-artifacts
             - name: TAG_VECTOR_KEY
               value: production/tag_to_vector.pkl
           resources:
