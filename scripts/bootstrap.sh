@@ -96,6 +96,87 @@ echo "=== Deploying monitoring stack ==="
 if [ -d "k8s/monitoring" ]; then
   [ -f "k8s/monitoring/kube-state-metrics-rbac.yaml" ] && kubectl apply -f k8s/monitoring/kube-state-metrics-rbac.yaml
   [ -f "k8s/monitoring/kube-state-metrics.yaml" ] && kubectl apply -f k8s/monitoring/kube-state-metrics.yaml
+  [ -f "k8s/monitoring/prometheus-rbac.yaml" ] && kubectl apply -f k8s/monitoring/prometheus-rbac.yaml
+  [ -f "k8s/monitoring/prometheus-pvc.yaml" ] && kubectl apply -f k8s/monitoring/prometheus-pvc.yaml
+  [ -f "k8s/monitoring/blackbox-exporter-configmap.yaml" ] && kubectl apply -f k8s/monitoring/blackbox-exporter-configmap.yaml
+  [ -f "k8s/monitoring/blackbox-exporter-deployment.yaml" ] && kubectl apply -f k8s/monitoring/blackbox-exporter-deployment.yaml
+  [ -f "k8s/monitoring/alertmanager-configmap.yaml" ] && kubectl apply -f k8s/monitoring/alertmanager-configmap.yaml
+  [ -f "k8s/monitoring/alertmanager-deployment.yaml" ] && kubectl apply -f k8s/monitoring/alertmanager-deployment.yaml
+  [ -f "k8s/monitoring/prometheus-configmap.yaml" ] && kubectl apply -f k8s/monitoring/prometheus-configmap.yaml
+  [ -f "k8s/monitoring/prometheus-deployment.yaml" ] && kubectl apply -f k8s/monitoring/prometheus-deployment.yaml
+  [ -f "k8s/monitoring/grafana-configmap.yaml" ] && kubectl apply -f k8s/monitoring/grafana-configmap.yaml
+  [ -f "k8s/monitoring/grafana-deployment.yaml" ] && kubectl apply -f k8s/monitoring/grafana-deployment.yaml
+
+  kubectl rollout status deployment/kube-state-metrics -n monitoring --timeout=240s || true
+  kubectl rollout status deployment/blackbox-exporter -n monitoring --timeout=240s || true
+  kubectl rollout status deployment/alertmanager -n monitoring --timeout=240s || true
+  kubectl rollout status deployment/prometheus -n monitoring --timeout=240s || true
+  kubectl rollout status deployment/grafana -n monitoring --timeout=240s || true
+else
+  echo "Monitoring directory not found, skipping monitoring deployment."
+fi
+
+echo "=== Current pods ==="
+kubectl get pods -A -o wide
+
+echo "=== Current services ==="
+kubectl get svc -A
+
+echo "=== Current PVCs ==="
+kubectl get pvc -A
+
+echo "=== Current cronjobs ==="
+kubectl get cronjobs -A
+
+echo "=== Current HPAs ==="
+kubectl get hpa -A || true
+
+echo "=== Probe status snapshot ==="
+kubectl describe deployment inference-api -n serving | sed -n '/Liveness:/,/Environment:/p' || true
+kubectl describe deployment feature-service -n data | sed -n '/Liveness:/,/Environment:/p' || true
+kubectl describe deployment mealie-app -n mealie | sed -n '/Liveness:/,/Environment:/p' || true
+kubectl describe deployment mlflow -n platform | sed -n '/Liveness:/,/Environment:/p' || true
+kubectl describe deployment minio -n platform | sed -n '/Liveness:/,/Environment:/p' || true
+
+echo
+echo "=== Bootstrap complete ==="
+echo "Mealie:        http://${NODE_IP}:30090"
+echo "MLflow:        http://${NODE_IP}:30500"
+echo "MinIO API:     http://${NODE_IP}:30900"
+echo "MinIO UI:      http://${NODE_IP}:30901"
+echo "Prometheus:    http://${NODE_IP}:30091"
+echo "Grafana:       http://${NODE_IP}:30300"
+echo "Alertmanager:  http://${NODE_IP}:30903"
+echo "MinIO buckets: mlflow, training-data, feature-store, inference-logs"
+echo "Namespaces:    platform, mealie, serving, data, training, monitoring"
+
+echo "=== Deploying MLflow ==="
+kubectl apply -f k8s/mlflow-deployment.yaml
+kubectl rollout status deployment/mlflow -n platform --timeout=300s
+
+echo "=== Deploying Mealie ==="
+kubectl apply -f k8s/mealie-deployment.yaml
+kubectl rollout status deployment/mealie-app -n mealie --timeout=300s
+
+echo "=== Deploying serving/data/training workloads ==="
+kubectl apply -f k8s/serving/inference-deployment.yaml
+kubectl apply -f k8s/data/feature-service.yaml
+kubectl apply -f k8s/data/batch-compile-cronjob.yaml
+kubectl apply -f k8s/training/monthly-retrain-cronjob.yaml
+kubectl apply -f k8s/training/nightly_eval.yaml
+
+echo "=== Applying feature-service HPA if present ==="
+if [ -f "k8s/monitoring/feature-service-hpa.yaml" ]; then
+  kubectl apply -f k8s/monitoring/feature-service-hpa.yaml
+fi
+
+kubectl rollout status deployment/inference-api -n serving --timeout=300s || true
+kubectl rollout status deployment/feature-service -n data --timeout=300s || true
+
+echo "=== Deploying monitoring stack ==="
+if [ -d "k8s/monitoring" ]; then
+  [ -f "k8s/monitoring/kube-state-metrics-rbac.yaml" ] && kubectl apply -f k8s/monitoring/kube-state-metrics-rbac.yaml
+  [ -f "k8s/monitoring/kube-state-metrics.yaml" ] && kubectl apply -f k8s/monitoring/kube-state-metrics.yaml
   [ -f "k8s/monitoring/alertmanager-configmap.yaml" ] && kubectl apply -f k8s/monitoring/alertmanager-configmap.yaml
   [ -f "k8s/monitoring/alertmanager-deployment.yaml" ] && kubectl apply -f k8s/monitoring/alertmanager-deployment.yaml
   [ -f "k8s/monitoring/prometheus-configmap.yaml" ] && kubectl apply -f k8s/monitoring/prometheus-configmap.yaml
