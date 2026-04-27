@@ -2,16 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV MINIO_BUCKET=mlflow-artifacts
+ENV TAG_VECTOR_CANDIDATES=production/tag_to_vector.pkl,canary/tag_to_vector.pkl,staging/tag_to_vector.pkl
 
-COPY app/ /app/
-COPY als_input.json /app/als_input.json
-COPY als_output.json /app/als_output.json
+COPY serving/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-ENV MODEL_DIR=/artifacts
-ENV MODEL_VERSION=als_v1_stub
+COPY serving /app/serving
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "serving.main:app", "--host", "0.0.0.0", "--port", "8000"]
