@@ -20,11 +20,11 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="Mealie Feature Service")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PG_HOST       = os.environ.get("POSTGRES_HOST", "postgres")
+PG_HOST       = os.environ.get("POSTGRES_HOST", "postgres.platform.svc.cluster.local")
 PG_USER       = os.environ["POSTGRES_USER"]
 PG_PASS       = os.environ["POSTGRES_PASSWORD"]
 PG_DB         = os.environ.get("POSTGRES_DB", "mealie")
-DIM           = 50
+DIM           = int(os.environ.get("DIM", 50))
 INFERENCE_URL = os.environ.get("INFERENCE_API_URL",
                                "http://inference-service.serving.svc.cluster.local:8000")
 

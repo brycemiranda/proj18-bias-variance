@@ -169,8 +169,8 @@ def check_training_set():
             overlap = len(set(train['user_id'].astype(str)) &
                          set(val['user_id'].astype(str)))
             metrics['user_overlap'] = overlap
-            check('no_user_overlap', overlap == 0, overlap,
-                  "0 overlapping users", warn=True)
+            # Per-user temporal split intentionally shares users across train/val
+            print(f"  [INFO] user_overlap={overlap} (expected — per-user temporal split)")
 
         if 'weight' in train.columns:
             pos = (train['weight'] > 0).mean()
