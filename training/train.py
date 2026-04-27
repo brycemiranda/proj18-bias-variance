@@ -20,15 +20,17 @@ from datetime import datetime
 
 # ─── CONFIG ───
 cfg = {
-    "num_factors": 50,
-    "regularization": 0.01,
-    "iterations": 20,
-    "alpha": 40,
-    "min_interactions": 5,
-    "test_split_ratio": 0.2,
-    "dataset": "mealie_production_data",
-    "model_type": "ALS",
+    "num_factors":      int(os.environ.get("NUM_FACTORS", 50)),
+    "regularization":   float(os.environ.get("REGULARIZATION", 0.01)),
+    "iterations":       int(os.environ.get("ITERATIONS", 20)),
+    "alpha":            int(os.environ.get("ALPHA", 40)),
+    "min_interactions": int(os.environ.get("MIN_INTERACTIONS", 2)),
+    "test_split_ratio": float(os.environ.get("TEST_SPLIT_RATIO", 0.2)),
+    "dataset":          os.environ.get("DATASET", "mealie_production_data"),
+    "model_type":       "ALS",
 }
+
+NDCG_POS_THRESHOLD = float(os.environ.get("NDCG_POS_THRESHOLD", 3.0))
 
 # ─── MinIO CLIENT ───
 def get_s3_client():
@@ -156,11 +158,11 @@ def compute_ndcg(model, train_matrix, val_matrix, k=10):
         if len(val_item_indices) == 0:
             continue
         
-        # Only consider positive val interactions (rating >= 4)
+        # Only consider positive val interactions (rating >= NDCG_POS_THRESHOLD)
         val_data = val_user_vec.data
         positive_val_items = set(
-            int(val_item_indices[i]) for i in range(len(val_item_indices)) 
-            if i < len(val_data) and float(val_data[i]) >= 4.0
+            int(val_item_indices[i]) for i in range(len(val_item_indices))
+            if i < len(val_data) and float(val_data[i]) >= NDCG_POS_THRESHOLD
         )
         
         if not positive_val_items:
@@ -328,7 +330,7 @@ def train():
         print(f"NDCG@10: {ndcg_at_10:.4f}")
         
         # ─── QUALITY GATE ───
-        NDCG_THRESHOLD = 0.01
+        NDCG_THRESHOLD = float(os.environ.get("NDCG_THRESHOLD", 0.01))
         gate_passed = ndcg_at_10 >= NDCG_THRESHOLD
         print(f"Quality gate: NDCG@10 {ndcg_at_10:.4f} >= {NDCG_THRESHOLD}? {gate_passed}")
         
