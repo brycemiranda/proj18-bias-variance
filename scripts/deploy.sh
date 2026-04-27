@@ -237,7 +237,11 @@ sudo kubectl apply -f "$MONITORING_DIR/kube-state-metrics-rbac.yaml"
 sudo kubectl apply -f "$MONITORING_DIR/kube-state-metrics.yaml"
 sudo kubectl apply -f "$MONITORING_DIR/inference-api-hpa.yaml"
 
+sudo kubectl rollout status deployment/kube-state-metrics -n monitoring --timeout=240s || true
 sudo kubectl rollout status deployment/blackbox-exporter -n monitoring --timeout=240s || true
+sudo kubectl rollout status deployment/alertmanager -n monitoring --timeout=240s || true
+sudo kubectl rollout status deployment/prometheus -n monitoring --timeout=240s || true
+sudo kubectl rollout status deployment/grafana -n monitoring --timeout=240s || true
 
 echo "=== [9/9] Opening iptables firewall ports ==="
 for port in 22 30090 30800 30500 30900 30901 30091 30300 30903; do
