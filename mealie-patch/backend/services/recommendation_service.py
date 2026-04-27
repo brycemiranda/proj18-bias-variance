@@ -16,7 +16,7 @@ from mealie.services.observability_metrics import record_recommendation_error, r
 
 log = logging.getLogger(__name__)
 
-INFERENCE_URL = os.getenv("INFERENCE_API_URL", "http://inference-api:8000")
+INFERENCE_URL = os.getenv("INFERENCE_API_URL", "http://inference-service.serving.svc.cluster.local:8000")
 FEATURE_SERVICE_URL = os.getenv("FEATURE_SERVICE_URL", "http://feature-service.data.svc.cluster.local:8080")
 LEARNING_RATE = 0.1
 COLD_START_THRESHOLD = 5
