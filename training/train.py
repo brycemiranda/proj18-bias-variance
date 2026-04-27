@@ -34,9 +34,9 @@ cfg = {
 def get_s3_client():
     return boto3.client(
         's3',
-        endpoint_url=os.environ.get('MINIO_ENDPOINT', 'http://129.114.26.176:30900'),
-        aws_access_key_id=os.environ.get('MINIO_ACCESS_KEY', 'minioadmin'),
-        aws_secret_access_key=os.environ.get('MINIO_SECRET_KEY', 'minioadmin123'),
+        endpoint_url=os.environ['MINIO_ENDPOINT'],
+        aws_access_key_id=os.environ['MINIO_ACCESS_KEY'],
+        aws_secret_access_key=os.environ['MINIO_SECRET_KEY'],
     )
 
 # ─── LOAD DATA FROM MINIO ───
@@ -244,7 +244,7 @@ def save_to_minio(obj, bucket, key):
 
 # ─── MAIN TRAINING FUNCTION ───
 def train():
-    mlflow.set_tracking_uri(os.environ.get('MLFLOW_TRACKING_URI', 'http://129.114.26.176:30500'))
+    mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
     mlflow.set_experiment("mealie-recipe-recommender")
     
     with mlflow.start_run():
@@ -316,7 +316,7 @@ def train():
             tag_to_vector = generate_tag_to_vector(model, mappings, train_df)
             
             # Save tag_to_vector to MinIO for Sharvin
-            save_to_minio(tag_to_vector, 'mlflow', 'production/tag_to_vector.pkl')
+            save_to_minio(tag_to_vector, os.environ.get('MINIO_BUCKET', 'mlflow-artifacts'), 'staging/tag_to_vector.pkl')
             
             # Save model artifacts
             os.makedirs('/tmp/model_artifacts', exist_ok=True)

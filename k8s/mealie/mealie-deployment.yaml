@@ -50,9 +50,6 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 2
             failureThreshold: 3
-          envFrom:
-            - configMapRef:
-                name: mealie-runtime-config
           env:
             - name: ALLOW_SIGNUP
               value: "true"
