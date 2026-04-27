@@ -36,6 +36,50 @@ pick_manifest() {
 echo "=== Verifying Kubernetes connectivity ==="
 kubectl get nodes
 
+
+echo "=== Setting up persistent block storage ==="
+BLOCK_DEVICE="${BLOCK_DEVICE:-/dev/vdb}"
+BLOCK_MOUNT="/mnt/block"
+K8S_STORAGE_PATH="${BLOCK_MOUNT}/k8s-storage/storage"
+
+if lsblk | grep -q "$(basename $BLOCK_DEVICE)"; then
+    echo "Block device ${BLOCK_DEVICE} found — setting up persistent storage..."
+    
+    # Only format if not already formatted
+    if ! blkid "${BLOCK_DEVICE}1" >/dev/null 2>&1; then
+        echo "Formatting block volume..."
+        sudo parted -s "${BLOCK_DEVICE}" mklabel gpt
+        sudo parted -s "${BLOCK_DEVICE}" mkpart primary ext4 0% 100%
+        sudo mkfs.ext4 "${BLOCK_DEVICE}1"
+    fi
+    
+    # Mount if not already mounted
+    if ! mountpoint -q "${BLOCK_MOUNT}"; then
+        sudo mkdir -p "${BLOCK_MOUNT}"
+        sudo mount "${BLOCK_DEVICE}1" "${BLOCK_MOUNT}"
+        sudo chown -R cc "${BLOCK_MOUNT}"
+        sudo chgrp -R cc "${BLOCK_MOUNT}"
+        
+        # Add to fstab if not already there
+        UUID=$(sudo blkid -s UUID -o value "${BLOCK_DEVICE}1")
+        if ! grep -q "$UUID" /etc/fstab; then
+            echo "UUID=${UUID} ${BLOCK_MOUNT} ext4 defaults 0 2" | sudo tee -a /etc/fstab
+        fi
+    fi
+    
+    # Create K8s storage directory
+    sudo mkdir -p "${K8S_STORAGE_PATH}"
+    sudo chown -R cc "${K8S_STORAGE_PATH}"
+    
+    # Configure K3s to use block volume for PVCs
+    kubectl patch configmap local-path-config -n kube-system --type=json \
+        -p="[{\"op\": \"replace\", \"path\": \"/data/config.json\", \"value\": \"{\\\"nodePathMap\\\":[{\\\"node\\\":\\\"DEFAULT_PATH_FOR_NON_LISTED_NODES\\\",\\\"paths\\\":[\\\"${K8S_STORAGE_PATH}\\\"]}]}\"}]" || true
+    
+    echo "Block storage configured at ${K8S_STORAGE_PATH}"
+else
+    echo "No block device ${BLOCK_DEVICE} found — using ephemeral storage (data will not persist across VM deletion)"
+fi
+
 echo "=== Applying namespaces ==="
 kubectl apply -f k8s/namespaces.yaml
 
