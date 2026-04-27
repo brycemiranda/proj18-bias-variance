@@ -64,7 +64,7 @@ spec:
                   name: minio-secret
                   key: secretkey
             - name: MINIO_BUCKET
-              value: mlflow-artifacts
+              value: mlflow
             - name: TAG_VECTOR_KEY
               value: production/tag_to_vector.pkl
           resources:
@@ -81,13 +81,12 @@ metadata:
   name: inference-service
   namespace: serving
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: inference-api
   ports:
     - port: 8000
       targetPort: 8000
-      nodePort: 30800
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

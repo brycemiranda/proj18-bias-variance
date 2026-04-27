@@ -1,0 +1,146 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"batch/v1","kind":"CronJob","metadata":{"annotations":{},"name":"model-promoter","namespace":"mealie-prod"},"spec":{"failedJobsHistoryLimit":3,"jobTemplate":{"spec":{"backoffLimit":1,"template":{"spec":{"containers":[{"args":["pip install --no-cache-dir boto3 mlflow \u003e/tmp/pip.log 2\u003e\u00261\npython - \u003c\u003c'PY'\nimport os, sys, json\nfrom datetime import datetime\nfrom io import BytesIO\nimport boto3\nimport mlflow\n\nendpoint  = os.environ[\"MINIO_ENDPOINT\"]\naccess    = os.environ[\"MINIO_ACCESS_KEY\"]\nsecret    = os.environ[\"MINIO_SECRET_KEY\"]\ntracking  = os.environ[\"MLFLOW_TRACKING_URI\"]\nmodel_bucket = \"mlflow-artifacts\"\n\ns3 = boto3.client(\"s3\", endpoint_url=endpoint,\n    aws_access_key_id=access, aws_secret_access_key=secret)\n\ndef copy_artifact(src, dst):\n    obj = s3.get_object(Bucket=model_bucket, Key=src)\n    s3.put_object(Bucket=model_bucket, Key=dst, Body=obj[\"Body\"].read())\n    print(f\"Copied {src} -\u003e {dst}\")\n\ndef artifact_exists(key):\n    try:\n        s3.head_object(Bucket=model_bucket, Key=key)\n        return True\n    except:\n        return False\n\nmlflow.set_tracking_uri(tracking)\nclient = mlflow.tracking.MlflowClient()\n\ntry:\n    exp = client.get_experiment_by_name(\"nightly-eval\")\n    if exp is None:\n        print(\"No nightly-eval experiment found yet — skipping promotion\")\n        sys.exit(0)\n\n    runs = client.search_runs(\n        experiment_ids=[exp.experiment_id],\n        order_by=[\"start_time DESC\"],\n        max_results=1,\n    )\n    if not runs:\n        print(\"No eval runs yet — skipping\")\n        sys.exit(0)\n\n    run = runs[0]\n    metrics = run.data.metrics\n    params  = run.data.params\n\n    inference_ok  = int(metrics.get(\"inference_status\", 0)) == 200\n    tag_vec_ok    = int(metrics.get(\"tag_vector_exists\", 0)) == 1\n    train_rows    = int(metrics.get(\"train_rows\", 0))\n    failed_checks = params.get(\"failed_checks\", \"unknown\")\n\n    print(f\"Latest eval: inference_ok={inference_ok}, tag_vec_ok={tag_vec_ok}, train_rows={train_rows}, failed={failed_checks}\")\n\n    if not inference_ok:\n        if artifact_exists(\"production/tag_to_vector.pkl.bak\"):\n            copy_artifact(\"production/tag_to_vector.pkl.bak\",\n                          \"production/tag_to_vector.pkl\")\n            print(\"ROLLBACK: restored production from backup\")\n        else:\n            print(\"ROLLBACK needed but no backup found\")\n        sys.exit(0)\n\n    staging_ready = (\n        artifact_exists(\"staging/tag_to_vector.pkl\")\n        and tag_vec_ok\n        and train_rows \u003e 0\n        and failed_checks in (\"none\", \"empty_dataset\")\n    )\n    if staging_ready:\n        if artifact_exists(\"canary/tag_to_vector.pkl\"):\n            if artifact_exists(\"production/tag_to_vector.pkl\"):\n                copy_artifact(\"production/tag_to_vector.pkl\",\n                              \"production/tag_to_vector.pkl.bak\")\n            copy_artifact(\"canary/tag_to_vector.pkl\",\n                          \"production/tag_to_vector.pkl\")\n            print(\"PROMOTED canary -\u003e production\")\n\n        copy_artifact(\"staging/tag_to_vector.pkl\",\n                      \"canary/tag_to_vector.pkl\")\n        print(\"PROMOTED staging -\u003e canary\")\n    else:\n        print(f\"Staging not ready for promotion: staging_exists={artifact_exists('staging/tag_to_vector.pkl')}, train_rows={train_rows}\")\n\n    print(\"Promoter run complete\")\n\nexcept Exception as e:\n    print(f\"Promoter error: {e}\")\n    raise\nPY\n"],"command":["/bin/sh","-lc"],"envFrom":[{"configMapRef":{"name":"shared-env"}}],"image":"python:3.11-slim","imagePullPolicy":"IfNotPresent","name":"model-promoter","resources":{"limits":{"cpu":"200m","memory":"256Mi"},"requests":{"cpu":"50m","memory":"128Mi"}}}],"restartPolicy":"OnFailure"}}}},"schedule":"0 */6 * * *","successfulJobsHistoryLimit":3}}
+  creationTimestamp: "2026-04-21T01:53:34Z"
+  generation: 1
+  name: model-promoter
+  namespace: mealie-prod
+  resourceVersion: "22709"
+  uid: 2d1faee8-2411-4ecc-889e-bc9ecf456649
+spec:
+  concurrencyPolicy: Allow
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata: {}
+    spec:
+      backoffLimit: 1
+      template:
+        metadata: {}
+        spec:
+          containers:
+          - args:
+            - |
+              pip install --no-cache-dir boto3 mlflow >/tmp/pip.log 2>&1
+              python - <<'PY'
+              import os, sys, json
+              from datetime import datetime
+              from io import BytesIO
+              import boto3
+              import mlflow
+
+              endpoint  = os.environ["MINIO_ENDPOINT"]
+              access    = os.environ["MINIO_ACCESS_KEY"]
+              secret    = os.environ["MINIO_SECRET_KEY"]
+              tracking  = os.environ["MLFLOW_TRACKING_URI"]
+              model_bucket = "mlflow-artifacts"
+
+              s3 = boto3.client("s3", endpoint_url=endpoint,
+                  aws_access_key_id=access, aws_secret_access_key=secret)
+
+              def copy_artifact(src, dst):
+                  obj = s3.get_object(Bucket=model_bucket, Key=src)
+                  s3.put_object(Bucket=model_bucket, Key=dst, Body=obj["Body"].read())
+                  print(f"Copied {src} -> {dst}")
+
+              def artifact_exists(key):
+                  try:
+                      s3.head_object(Bucket=model_bucket, Key=key)
+                      return True
+                  except:
+                      return False
+
+              mlflow.set_tracking_uri(tracking)
+              client = mlflow.tracking.MlflowClient()
+
+              try:
+                  exp = client.get_experiment_by_name("nightly-eval")
+                  if exp is None:
+                      print("No nightly-eval experiment found yet — skipping promotion")
+                      sys.exit(0)
+
+                  runs = client.search_runs(
+                      experiment_ids=[exp.experiment_id],
+                      order_by=["start_time DESC"],
+                      max_results=1,
+                  )
+                  if not runs:
+                      print("No eval runs yet — skipping")
+                      sys.exit(0)
+
+                  run = runs[0]
+                  metrics = run.data.metrics
+                  params  = run.data.params
+
+                  inference_ok  = int(metrics.get("inference_status", 0)) == 200
+                  tag_vec_ok    = int(metrics.get("tag_vector_exists", 0)) == 1
+                  train_rows    = int(metrics.get("train_rows", 0))
+                  failed_checks = params.get("failed_checks", "unknown")
+
+                  print(f"Latest eval: inference_ok={inference_ok}, tag_vec_ok={tag_vec_ok}, train_rows={train_rows}, failed={failed_checks}")
+
+                  if not inference_ok:
+                      if artifact_exists("production/tag_to_vector.pkl.bak"):
+                          copy_artifact("production/tag_to_vector.pkl.bak",
+                                        "production/tag_to_vector.pkl")
+                          print("ROLLBACK: restored production from backup")
+                      else:
+                          print("ROLLBACK needed but no backup found")
+                      sys.exit(0)
+
+                  staging_ready = (
+                      artifact_exists("staging/tag_to_vector.pkl")
+                      and tag_vec_ok
+                      and train_rows > 0
+                      and failed_checks in ("none", "empty_dataset")
+                  )
+                  if staging_ready:
+                      if artifact_exists("canary/tag_to_vector.pkl"):
+                          if artifact_exists("production/tag_to_vector.pkl"):
+                              copy_artifact("production/tag_to_vector.pkl",
+                                            "production/tag_to_vector.pkl.bak")
+                          copy_artifact("canary/tag_to_vector.pkl",
+                                        "production/tag_to_vector.pkl")
+                          print("PROMOTED canary -> production")
+
+                      copy_artifact("staging/tag_to_vector.pkl",
+                                    "canary/tag_to_vector.pkl")
+                      print("PROMOTED staging -> canary")
+                  else:
+                      print(f"Staging not ready for promotion: staging_exists={artifact_exists('staging/tag_to_vector.pkl')}, train_rows={train_rows}")
+
+                  print("Promoter run complete")
+
+              except Exception as e:
+                  print(f"Promoter error: {e}")
+                  raise
+              PY
+            command:
+            - /bin/sh
+            - -lc
+            envFrom:
+            - configMapRef:
+                name: shared-env
+            image: python:3.11-slim
+            imagePullPolicy: IfNotPresent
+            name: model-promoter
+            resources:
+              limits:
+                cpu: 200m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 128Mi
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: OnFailure
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+  schedule: 0 */6 * * *
+  successfulJobsHistoryLimit: 3
+  suspend: false
+status: {}

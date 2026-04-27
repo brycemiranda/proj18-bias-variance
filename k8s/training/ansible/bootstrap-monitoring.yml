@@ -1,0 +1,64 @@
+---
+- name: Bootstrap Mealie Kubernetes stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    infra_root: /Users/mahimamariah/Downloads/mealie_devops_scaffold/infrastructure
+
+  tasks:
+    - name: Check kubectl is available
+      ansible.builtin.command: kubectl version --client
+      changed_when: false
+
+    - name: Apply namespaces
+      ansible.builtin.command: kubectl apply -f {{ infra_root }}/k8s/namespaces.yaml
+      changed_when: false
+
+    - name: Apply monitoring namespace
+      ansible.builtin.command: kubectl apply -f {{ infra_root }}/k8s/monitoring/monitoring-namespace.yaml
+      changed_when: false
+
+    - name: Create application secrets
+      ansible.builtin.command: bash {{ infra_root }}/scripts/create-secrets.sh
+      environment:
+        GRAFANA_ADMIN_PASSWORD: "{{ grafana_admin_password | default(omit) }}"
+        DB_USERNAME: "{{ db_username | default(omit) }}"
+        DB_PASSWORD: "{{ db_password | default(omit) }}"
+        MINIO_ACCESS_KEY: "{{ minio_access_key | default(omit) }}"
+        MINIO_SECRET_KEY: "{{ minio_secret_key | default(omit) }}"
+      changed_when: false
+
+    - name: Apply core platform workloads
+      ansible.builtin.command: kubectl apply -f {{ item }}
+      loop:
+        - "{{ infra_root }}/k8s/postgres-statefulset.yaml"
+        - "{{ infra_root }}/k8s/minio-deployment.yaml"
+        - "{{ infra_root }}/k8s/minio-init-job.yaml"
+        - "{{ infra_root }}/k8s/mlflow-deployment.yaml"
+        - "{{ infra_root }}/k8s/mealie-deployment.yaml"
+      changed_when: false
+
+    - name: Apply training workloads
+      ansible.builtin.command: kubectl apply -f {{ item }}
+      loop:
+        - "{{ infra_root }}/k8s/serving/inference-deployment.yaml"
+        - "{{ infra_root }}/k8s/data/feature-service.yaml"
+        - "{{ infra_root }}/k8s/data/batch-compile-cronjob.yaml"
+        - "{{ infra_root }}/k8s/training/monthly-retrain-cronjob.yaml"
+        - "{{ infra_root }}/k8s/training/nightly_eval.yaml"
+      changed_when: false
+
+    - name: Apply monitoring workloads
+      ansible.builtin.command: kubectl apply -f {{ item }}
+      loop:
+        - "{{ infra_root }}/k8s/monitoring/kube-state-metrics-rbac.yaml"
+        - "{{ infra_root }}/k8s/monitoring/kube-state-metrics.yaml"
+        - "{{ infra_root }}/k8s/monitoring/alertmanager-configmap.yaml"
+        - "{{ infra_root }}/k8s/monitoring/alertmanager-deployment.yaml"
+        - "{{ infra_root }}/k8s/monitoring/prometheus-configmap.yaml"
+        - "{{ infra_root }}/k8s/monitoring/prometheus-deployment.yaml"
+        - "{{ infra_root }}/k8s/monitoring/grafana-configmap.yaml"
+        - "{{ infra_root }}/k8s/monitoring/grafana-deployment.yaml"
+      changed_when: false

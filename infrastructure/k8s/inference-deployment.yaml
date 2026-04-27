@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-api
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-api
+  template:
+    metadata:
+      labels:
+        app: inference-api
+    spec:
+      containers:
+        - name: inference-api
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install fastapi uvicorn &&
+              cat <<'PY' > /app.py
+              from fastapi import FastAPI
+              from pydantic import BaseModel
+              from typing import List, Dict, Any
+              import time
+
+              app = FastAPI()
+
+              class RequestPayload(BaseModel):
+                  user_id: str
+                  user_vector: List[float]
+                  library_recipes: List[Dict[str, Any]]
+                  top_n: int
+
+              @app.get("/health")
+              def health():
+                  return {"status": "ok"}
+
+              @app.post("/recommend")
+              def recommend(payload: RequestPayload):
+                  start = time.time()
+                  recs = []
+                  for i, recipe in enumerate(payload.library_recipes[:payload.top_n], start=1):
+                      recs.append({
+                          "rank": i,
+                          "recipe_id": recipe["recipe_id"],
+                          "name": recipe["name"],
+                          "score": round(1.0 / i, 4),
+                          "tags": recipe.get("tags", [])
+                      })
+                  return {
+                      "user_id": payload.user_id,
+                      "recommendations": recs,
+                      "model_version": "als_v1",
+                      "inference_time_ms": round((time.time() - start) * 1000, 2)
+                  }
+              PY
+              uvicorn app:app --host 0.0.0.0 --port 8000
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-service
+  namespace: platform
+spec:
+  type: NodePort
+  selector:
+    app: inference-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30800

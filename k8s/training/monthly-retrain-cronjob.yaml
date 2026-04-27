@@ -33,12 +33,6 @@ spec:
                       key: secretkey
                 - name: MLFLOW_S3_ENDPOINT_URL
                   value: http://minio-service.platform.svc.cluster.local:9000
-                - name: MINIO_ENDPOINT
-                  value: http://minio-service.platform.svc.cluster.local:9000
-                - name: MINIO_BUCKET
-                  value: mlflow-artifacts
-                - name: DATA_BUCKET
-                  value: training-data
               resources:
                 requests:
                   cpu: "100m"

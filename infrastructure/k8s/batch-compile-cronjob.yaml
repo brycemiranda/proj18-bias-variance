@@ -1,0 +1,154 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"batch/v1","kind":"CronJob","metadata":{"annotations":{},"name":"batch-compile-datasets","namespace":"mealie-prod"},"spec":{"failedJobsHistoryLimit":3,"jobTemplate":{"spec":{"backoffLimit":1,"template":{"spec":{"containers":[{"args":["set -euo pipefail\npip install --no-cache-dir boto3 pandas pyarrow psycopg2-binary \u003e/tmp/pip.log 2\u003e\u00261\npython - \u003c\u003c'PY'\nimport json, os\nfrom datetime import datetime\nfrom io import BytesIO\nimport boto3\nimport pandas as pd\nimport psycopg2\n\nbucket = os.environ[\"TRAINING_BUCKET\"]\ndataset_version = os.environ.get(\"DATASET_VERSION\", \"current\")\nendpoint = os.environ[\"MINIO_ENDPOINT\"]\naccess = os.environ[\"MINIO_ACCESS_KEY\"]\nsecret = os.environ[\"MINIO_SECRET_KEY\"]\npg_host = os.environ[\"POSTGRES_SERVER\"]\npg_port = int(os.environ.get(\"POSTGRES_PORT\", \"5432\"))\npg_db = os.environ[\"POSTGRES_DB\"]\npg_user = os.environ[\"POSTGRES_USER\"]\npg_pass = os.environ[\"POSTGRES_PASSWORD\"]\n\ns3 = boto3.client(\"s3\", endpoint_url=endpoint,\n    aws_access_key_id=access, aws_secret_access_key=secret)\ntry:\n    s3.head_bucket(Bucket=bucket)\nexcept Exception:\n    s3.create_bucket(Bucket=bucket)\n\nquery = \"\"\"\nSELECT ur.user_id, ur.recipe_id, ur.rating,\n  COALESCE(ur.update_at, ur.created_at) AS ts,\n  STRING_AGG(t.name, '||') AS tag_blob\nFROM users_to_recipes ur\nJOIN recipes r ON r.id = ur.recipe_id\nLEFT JOIN recipes_to_tags rt ON rt.recipe_id = r.id\nLEFT JOIN tags t ON t.id = rt.tag_id\nWHERE ur.rating IS NOT NULL\nGROUP BY ur.user_id, ur.recipe_id, ur.rating,\n  COALESCE(ur.update_at, ur.created_at)\nORDER BY ts ASC\n\"\"\"\n\nconn = psycopg2.connect(host=pg_host, port=pg_port,\n    dbname=pg_db, user=pg_user, password=pg_pass)\ndf = pd.read_sql_query(query, conn)\nconn.close()\n\nif df.empty:\n    raise SystemExit(\"No user ratings in Postgres yet — rate some recipes first\")\n\ndf[\"timestamp\"] = pd.to_datetime(df[\"ts\"], errors=\"coerce\").fillna(pd.Timestamp.utcnow())\ndf[\"rating\"] = df[\"rating\"].astype(float)\ndf[\"tags\"] = df[\"tag_blob\"].fillna(\"\").apply(\n    lambda raw: [t for t in raw.split(\"||\") if t])\ndf = df[[\"user_id\",\"recipe_id\",\"rating\",\"tags\",\"timestamp\"]].sort_values(\"timestamp\")\n\ncut = max(1, int(len(df) * 0.8))\nif cut \u003e= len(df): cut = len(df) - 1\ntrain, val = df.iloc[:cut].copy(), df.iloc[cut:].copy()\n\ndef upload_parquet(frame, key):\n    buf = BytesIO()\n    frame.to_parquet(buf, index=False)\n    buf.seek(0)\n    s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())\n\nprefix = f\"datasets/{dataset_version}\"\nupload_parquet(train, f\"{prefix}/train.parquet\")\nupload_parquet(val, f\"{prefix}/val.parquet\")\n\nmanifest = {\"dataset_version\": dataset_version,\n    \"generated_at\": datetime.utcnow().isoformat(),\n    \"train_rows\": int(len(train)), \"val_rows\": int(len(val)),\n    \"unique_users\": int(df[\"user_id\"].nunique()),\n    \"unique_recipes\": int(df[\"recipe_id\"].nunique())}\ns3.put_object(Bucket=bucket, Key=f\"{prefix}/meta.json\",\n    Body=json.dumps(manifest, indent=2).encode())\nprint(json.dumps(manifest, indent=2))\nPY\n"],"command":["/bin/sh","-lc"],"env":[{"name":"TRAINING_BUCKET","value":"training-data"},{"name":"DATASET_VERSION","value":"current"},{"name":"POSTGRES_SERVER","value":"postgres.platform.svc.cluster.local"},{"name":"POSTGRES_PORT","value":"5432"},{"name":"POSTGRES_DB","value":"mealie"},{"name":"POSTGRES_USER","valueFrom":{"secretKeyRef":{"key":"username","name":"postgres-secret"}}},{"name":"POSTGRES_PASSWORD","valueFrom":{"secretKeyRef":{"key":"password","name":"postgres-secret"}}}],"envFrom":[{"configMapRef":{"name":"shared-env"}}],"image":"python:3.11-slim","imagePullPolicy":"IfNotPresent","name":"batch-compile-datasets","resources":{"limits":{"cpu":"500m","memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}}],"restartPolicy":"OnFailure"}}}},"schedule":"0 2 * * *","successfulJobsHistoryLimit":3}}
+  creationTimestamp: "2026-04-20T22:53:25Z"
+  generation: 2
+  name: batch-compile-datasets
+  namespace: mealie-prod
+  resourceVersion: "25148"
+  uid: 1f1599dd-e718-434c-8bfd-bab0e7130bd5
+spec:
+  concurrencyPolicy: Allow
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata: {}
+    spec:
+      backoffLimit: 1
+      template:
+        metadata: {}
+        spec:
+          containers:
+          - args:
+            - |
+              set -euo pipefail
+              pip install --no-cache-dir boto3 pandas pyarrow psycopg2-binary >/tmp/pip.log 2>&1
+              python - <<'PY'
+              import json, os
+              from datetime import datetime
+              from io import BytesIO
+              import boto3
+              import pandas as pd
+              import psycopg2
+
+              bucket = os.environ["TRAINING_BUCKET"]
+              dataset_version = os.environ.get("DATASET_VERSION", "current")
+              endpoint = os.environ["MINIO_ENDPOINT"]
+              access = os.environ["MINIO_ACCESS_KEY"]
+              secret = os.environ["MINIO_SECRET_KEY"]
+              pg_host = os.environ["POSTGRES_SERVER"]
+              pg_port = int(os.environ.get("POSTGRES_PORT", "5432"))
+              pg_db = os.environ["POSTGRES_DB"]
+              pg_user = os.environ["POSTGRES_USER"]
+              pg_pass = os.environ["POSTGRES_PASSWORD"]
+
+              s3 = boto3.client("s3", endpoint_url=endpoint,
+                  aws_access_key_id=access, aws_secret_access_key=secret)
+              try:
+                  s3.head_bucket(Bucket=bucket)
+              except Exception:
+                  s3.create_bucket(Bucket=bucket)
+
+              query = """
+              SELECT ur.user_id, ur.recipe_id, ur.rating,
+                COALESCE(ur.update_at, ur.created_at) AS ts,
+                STRING_AGG(t.name, '||') AS tag_blob
+              FROM users_to_recipes ur
+              JOIN recipes r ON r.id = ur.recipe_id
+              LEFT JOIN recipes_to_tags rt ON rt.recipe_id = r.id
+              LEFT JOIN tags t ON t.id = rt.tag_id
+              WHERE ur.rating IS NOT NULL
+              GROUP BY ur.user_id, ur.recipe_id, ur.rating,
+                COALESCE(ur.update_at, ur.created_at)
+              ORDER BY ts ASC
+              """
+
+              conn = psycopg2.connect(host=pg_host, port=pg_port,
+                  dbname=pg_db, user=pg_user, password=pg_pass)
+              df = pd.read_sql_query(query, conn)
+              conn.close()
+
+              if df.empty:
+                  raise SystemExit("No user ratings in Postgres yet — rate some recipes first")
+
+              df["timestamp"] = pd.to_datetime(df["ts"], errors="coerce").fillna(pd.Timestamp.utcnow())
+              df["rating"] = df["rating"].astype(float)
+              df["tags"] = df["tag_blob"].fillna("").apply(
+                  lambda raw: [t for t in raw.split("||") if t])
+              df = df[["user_id","recipe_id","rating","tags","timestamp"]].sort_values("timestamp")
+
+              cut = max(1, int(len(df) * 0.8))
+              if cut >= len(df): cut = len(df) - 1
+              train, val = df.iloc[:cut].copy(), df.iloc[cut:].copy()
+
+              def upload_parquet(frame, key):
+                  buf = BytesIO()
+                  frame.to_parquet(buf, index=False)
+                  buf.seek(0)
+                  s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+
+              prefix = f"datasets/{dataset_version}"
+              upload_parquet(train, f"{prefix}/train.parquet")
+              upload_parquet(val, f"{prefix}/val.parquet")
+
+              manifest = {"dataset_version": dataset_version,
+                  "generated_at": datetime.utcnow().isoformat(),
+                  "train_rows": int(len(train)), "val_rows": int(len(val)),
+                  "unique_users": int(df["user_id"].nunique()),
+                  "unique_recipes": int(df["recipe_id"].nunique())}
+              s3.put_object(Bucket=bucket, Key=f"{prefix}/meta.json",
+                  Body=json.dumps(manifest, indent=2).encode())
+              print(json.dumps(manifest, indent=2))
+              PY
+            command:
+            - /bin/sh
+            - -lc
+            env:
+            - name: TRAINING_BUCKET
+              value: training-data
+            - name: DATASET_VERSION
+              value: current
+            - name: POSTGRES_SERVER
+              value: postgres.platform.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: mealie
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: postgres-secret
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: postgres-secret
+            envFrom:
+            - configMapRef:
+                name: shared-env
+            image: python:3.11-slim
+            imagePullPolicy: IfNotPresent
+            name: batch-compile-datasets
+            resources:
+              limits:
+                cpu: 500m
+                memory: 1Gi
+              requests:
+                cpu: 100m
+                memory: 256Mi
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: OnFailure
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+  schedule: 0 2 * * *
+  successfulJobsHistoryLimit: 3
+  suspend: false
+status:
+  lastScheduleTime: "2026-04-21T02:00:00Z"
+  lastSuccessfulTime: "2026-04-21T03:29:27Z"

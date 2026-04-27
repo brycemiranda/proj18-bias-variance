@@ -14,7 +14,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: nightly-eval
-              image: brycemiranda/mealie-nightly-eval:latest
+              image: mahimamariah/mealie-nightly-eval:latest
               imagePullPolicy: Always
               env:
                 - name: MINIO_ENDPOINT
@@ -31,10 +31,6 @@ spec:
                       key: secretkey
                 - name: BUCKET_NAME
                   value: training-data
-                - name: ARTIFACTS_BUCKET
-                  value: mlflow-artifacts
-                - name: INFERENCE_API_URL
-                  value: "http://inference-service.serving.svc.cluster.local:8000"
                 - name: MLFLOW_TRACKING_URI
                   value: http://mlflow-service.platform.svc.cluster.local:5000
                 - name: POSTGRES_HOST
