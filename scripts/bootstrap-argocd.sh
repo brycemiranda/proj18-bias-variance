@@ -69,6 +69,23 @@ build_and_import() {
   echo "Imported ${image_name} into k3s."
 }
 
+ensure_mealie_source() {
+  if [ -f "mealie_proj18/docker/Dockerfile" ]; then
+    return
+  fi
+
+  if [ -f ".gitmodules" ]; then
+    require_cmd git
+    echo "=== Initializing mealie_proj18 submodule ==="
+    git submodule update --init --recursive mealie_proj18
+  fi
+
+  if [ ! -f "mealie_proj18/docker/Dockerfile" ]; then
+    echo "Error: mealie_proj18/docker/Dockerfile not found."
+    exit 1
+  fi
+}
+
 load_secrets_file() {
   if [ -f "${SECRETS_FILE}" ]; then
     echo "=== Loading secrets from ${SECRETS_FILE} ==="
@@ -332,9 +349,11 @@ kubectl create configmap mealie-runtime-config \
   --from-literal=BASE_URL="http://${NODE_IP}:30090" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+ensure_mealie_source
+
 echo "=== Building local application images ==="
 build_and_import "proj18biasvariance/mealie-serving:local" "serving/Dockerfile" "."
-build_and_import "proj18biasvariance/mealie-custom:local" "mealie-patch/Dockerfile" "mealie-patch"
+build_and_import "proj18biasvariance/mealie-custom:local" "mealie_proj18/docker/Dockerfile" "mealie_proj18"
 build_and_import "proj18biasvariance/mealie-feature-service:local" "data/feature_service/Dockerfile" "data/feature_service"
 build_and_import "proj18biasvariance/batch-compile-datasets:local" "data/batch/Dockerfile" "data/batch"
 build_and_import "proj18biasvariance/mealie-als-training:local" "training/Dockerfile" "training"
