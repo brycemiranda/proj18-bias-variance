@@ -62,7 +62,7 @@ If the recovered filesystem is present, continue.
 ### 5. Run the ArgoCD bootstrap
 
 ```bash
-bash scripts/bootstrap-argocd.sh
+bash scripts/bootstrap-argocd.sh <floating-ip>
 ```
 
 The script performs the full deployment:
@@ -73,6 +73,8 @@ The script performs the full deployment:
 4. installs ArgoCD
 5. creates ArgoCD Applications for `core`, `platform`, `serving`, `data`, `training`, `mealie`, and `monitoring`
 6. waits for the critical rollouts to finish
+
+Passing `<floating-ip>` is recommended so the script prints externally reachable URLs instead of the node's internal `10.x` address.
 
 ### 6. Verify the system
 

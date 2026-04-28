@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
+EXPLICIT_HOST_IP="${1:-${FLOATING_IP:-${HOST_IP:-}}}"
 SECRETS_FILE="${SECRETS_FILE:-scripts/secrets.env}"
 
 require_cmd() {
@@ -80,7 +81,7 @@ load_secrets_file() {
 
 detect_node_ip() {
   local detected
-  detected="${HOST_IP:-}"
+  detected="${EXPLICIT_HOST_IP:-}"
   if [ -n "${detected}" ]; then
     echo "${detected}"
     return

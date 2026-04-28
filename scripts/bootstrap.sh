@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
+EXPLICIT_HOST_IP="${1:-${FLOATING_IP:-${HOST_IP:-}}}"
 SECRETS_FILE="${SECRETS_FILE:-scripts/secrets.env}"
 RUN_INGESTION_JOB="${RUN_INGESTION_JOB:-0}"
 RUN_BATCH_BOOTSTRAP="${RUN_BATCH_BOOTSTRAP:-0}"
@@ -104,7 +105,7 @@ build_and_import() {
 
 detect_node_ip() {
   local detected
-  detected="${HOST_IP:-}"
+  detected="${EXPLICIT_HOST_IP:-}"
   if [ -n "${detected}" ]; then
     echo "${detected}"
     return
