@@ -254,6 +254,9 @@ restore_previous_persistent_state() {
 
   echo "=== Restoring previous PVC data from ${K8S_STORAGE_DIR} when available ==="
 
+  scale_resource argocd statefulset argocd-application-controller 0
+  wait_for_no_pods argocd app.kubernetes.io/name=argocd-application-controller 180 || true
+
   wait_for_resource platform pvc minio-pvc 300
   wait_for_resource platform pvc postgres-pvc 300
   wait_for_resource platform pvc mlflow-pvc 300
@@ -292,6 +295,8 @@ restore_previous_persistent_state() {
   scale_resource platform deployment minio 1
   scale_resource platform deployment mlflow 1
   scale_resource mealie deployment mealie-app 1
+  scale_resource argocd statefulset argocd-application-controller 1
+  wait_for_rollout argocd statefulset argocd-application-controller 300
 }
 
 setup_persistent_storage() {
