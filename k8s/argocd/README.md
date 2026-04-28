@@ -76,6 +76,25 @@ The script performs the full deployment:
 
 Passing `<floating-ip>` is recommended so the script prints externally reachable URLs instead of the node's internal `10.x` address.
 
+### Rerun behavior
+
+The bootstrap builds `proj18biasvariance/mealie-custom:local` from the `mealie_proj18` submodule.
+
+On a fresh VM, that image is used automatically when `mealie-app` is created.
+
+On an already-running cluster, the bootstrap does **not** restart `mealie-app` by default, to avoid disrupting a healthy Mealie session during a recovery rerun. If you intentionally want to refresh the running Mealie deployment to pick up newer `mealie_proj18` code, use one of these:
+
+```bash
+RESTART_MEALIE_APP_ON_RERUN=1 bash scripts/bootstrap-argocd.sh <floating-ip>
+```
+
+or:
+
+```bash
+kubectl rollout restart deployment/mealie-app -n mealie
+kubectl rollout status deployment/mealie-app -n mealie --timeout=600s
+```
+
 ### 6. Verify the system
 
 ```bash

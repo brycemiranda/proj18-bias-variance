@@ -13,6 +13,7 @@ RUN_TRAIN_BOOTSTRAP="${RUN_TRAIN_BOOTSTRAP:-0}"
 BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
 K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
 RESTART_LOCAL_WORKLOADS="${RESTART_LOCAL_WORKLOADS:-0}"
+RESTART_MEALIE_APP_ON_RERUN="${RESTART_MEALIE_APP_ON_RERUN:-0}"
 RESTART_INFERENCE_API=0
 RESTART_INFERENCE_API_CANARY=0
 RESTART_FEATURE_SERVICE=0
@@ -106,17 +107,21 @@ capture_existing_local_workloads() {
   deployment_exists serving inference-api-canary && EXISTING_INFERENCE_API_CANARY=1 || EXISTING_INFERENCE_API_CANARY=0
   deployment_exists data feature-service && EXISTING_FEATURE_SERVICE=1 || EXISTING_FEATURE_SERVICE=0
   deployment_exists mealie mealie-app && EXISTING_MEALIE_APP=1 || EXISTING_MEALIE_APP=0
-  RESTART_MEALIE_APP="${EXISTING_MEALIE_APP}"
+  RESTART_MEALIE_APP=0
 
   if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
     RESTART_INFERENCE_API=0
     RESTART_INFERENCE_API_CANARY=0
     RESTART_FEATURE_SERVICE=0
-    return
+  else
+    RESTART_INFERENCE_API="${EXISTING_INFERENCE_API}"
+    RESTART_INFERENCE_API_CANARY="${EXISTING_INFERENCE_API_CANARY}"
+    RESTART_FEATURE_SERVICE="${EXISTING_FEATURE_SERVICE}"
   fi
-  RESTART_INFERENCE_API="${EXISTING_INFERENCE_API}"
-  RESTART_INFERENCE_API_CANARY="${EXISTING_INFERENCE_API_CANARY}"
-  RESTART_FEATURE_SERVICE="${EXISTING_FEATURE_SERVICE}"
+
+  if env_flag "${RESTART_MEALIE_APP_ON_RERUN}" && [ "${EXISTING_MEALIE_APP}" = "1" ]; then
+    RESTART_MEALIE_APP=1
+  fi
 }
 
 env_flag() {
@@ -654,7 +659,7 @@ restart_local_image_workloads() {
   if [ "${RESTART_MEALIE_APP}" = "1" ]; then
     kubectl rollout restart deployment/mealie-app -n mealie || true
   else
-    echo "Skipping mealie-app restart on first deployment."
+    echo "Skipping mealie-app restart. Set RESTART_MEALIE_APP_ON_RERUN=1 to refresh it on an existing cluster."
   fi
 }
 
