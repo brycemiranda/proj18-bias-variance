@@ -145,7 +145,9 @@ wait_for_deployment_rollout_with_cleanup() {
   local name="$2"
   local selector="$3"
   local timeout="${4:-300}"
-  local deadline remaining slice
+  local deadline remaining spec_replicas updated ready available terminating
+
+  wait_for_resource "${namespace}" deployment "${name}" "${timeout}"
 
   deadline=$((SECONDS + timeout))
 
@@ -153,15 +155,25 @@ wait_for_deployment_rollout_with_cleanup() {
     remaining=$((deadline - SECONDS))
     if [ "${remaining}" -le 0 ]; then
       echo "Error: deployment/${name} in namespace ${namespace} did not finish rolling out within ${timeout}s."
+      kubectl get pods -n "${namespace}" -l "${selector}" -o wide || true
+      kubectl describe deployment "${name}" -n "${namespace}" || true
       exit 1
     fi
 
-    slice="${remaining}"
-    if [ "${slice}" -gt 60 ]; then
-      slice=60
-    fi
+    spec_replicas="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+    updated="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || echo 0)"
+    ready="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+    available="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)"
+    updated="${updated:-0}"
+    ready="${ready:-0}"
+    available="${available:-0}"
+    terminating="$(kubectl get pods -n "${namespace}" -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null | grep -c . || true)"
+    terminating="${terminating:-0}"
 
-    if kubectl rollout status "deployment/${name}" -n "${namespace}" --timeout="${slice}s"; then
+    if [ "${updated}" -ge "${spec_replicas}" ] && \
+       [ "${ready}" -ge "${spec_replicas}" ] && \
+       [ "${available}" -ge "${spec_replicas}" ] && \
+       [ "${terminating}" -eq 0 ]; then
       return
     fi
 
