@@ -12,6 +12,10 @@ RUN_BATCH_BOOTSTRAP="${RUN_BATCH_BOOTSTRAP:-0}"
 RUN_TRAIN_BOOTSTRAP="${RUN_TRAIN_BOOTSTRAP:-0}"
 BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
 K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
+RESTART_INFERENCE_API=0
+RESTART_INFERENCE_API_CANARY=0
+RESTART_FEATURE_SERVICE=0
+RESTART_MEALIE_APP=0
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -84,6 +88,19 @@ kubectl() {
 
 docker_cmd() {
   "${DOCKER_BIN[@]}" "$@"
+}
+
+deployment_exists() {
+  local namespace="$1"
+  local name="$2"
+  kubectl get "deployment/${name}" -n "${namespace}" >/dev/null 2>&1
+}
+
+capture_existing_local_workloads() {
+  deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
+  deployment_exists serving inference-api-canary && RESTART_INFERENCE_API_CANARY=1 || RESTART_INFERENCE_API_CANARY=0
+  deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
+  deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
 }
 
 env_flag() {
@@ -535,10 +552,26 @@ EOF
 
 restart_local_image_workloads() {
   echo "=== Restarting local-image workloads ==="
-  kubectl rollout restart deployment/inference-api -n serving || true
-  kubectl rollout restart deployment/inference-api-canary -n serving || true
-  kubectl rollout restart deployment/feature-service -n data || true
-  kubectl rollout restart deployment/mealie-app -n mealie || true
+  if [ "${RESTART_INFERENCE_API}" = "1" ]; then
+    kubectl rollout restart deployment/inference-api -n serving || true
+  else
+    echo "Skipping inference-api restart on first deployment."
+  fi
+  if [ "${RESTART_INFERENCE_API_CANARY}" = "1" ]; then
+    kubectl rollout restart deployment/inference-api-canary -n serving || true
+  else
+    echo "Skipping inference-api-canary restart on first deployment."
+  fi
+  if [ "${RESTART_FEATURE_SERVICE}" = "1" ]; then
+    kubectl rollout restart deployment/feature-service -n data || true
+  else
+    echo "Skipping feature-service restart on first deployment."
+  fi
+  if [ "${RESTART_MEALIE_APP}" = "1" ]; then
+    kubectl rollout restart deployment/mealie-app -n mealie || true
+  else
+    echo "Skipping mealie-app restart on first deployment."
+  fi
 }
 
 seed_production_model() {
@@ -679,6 +712,8 @@ kubectl create configmap mealie-runtime-config \
 
 echo "=== Applying shared config ==="
 kubectl apply -f k8s/platform/shared-configmap.yaml
+
+capture_existing_local_workloads
 
 ensure_mealie_source
 
