@@ -55,9 +55,18 @@ data:
           - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
 
       - job_name: mealie-api
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
         static_configs:
-          - targets: ['mealie-service.mealie.svc.cluster.local:9000']
-        metrics_path: /api/metrics
+          - targets: ['http://mealie-service.mealie.svc.cluster.local:9000/']
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.monitoring.svc.cluster.local:9115
 
       - job_name: inference-api
         static_configs:
@@ -155,7 +164,7 @@ data:
               description: "Prometheus cannot scrape the inference API in the serving namespace."
 
           - alert: MealieAPIDown
-            expr: up{job="mealie-api"} == 0
+            expr: probe_success{job="mealie-api"} == 0
             for: 2m
             labels:
               severity: critical
