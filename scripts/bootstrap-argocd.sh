@@ -257,7 +257,7 @@ spec:
             - -c
           args:
             - |
-              until mc alias set local http://minio-service.platform.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+              until mc alias set local http://minio-service.platform.svc.cluster.local:9000 "\$MINIO_ROOT_USER" "\$MINIO_ROOT_PASSWORD"; do
                 echo "Waiting for MinIO..."
                 sleep 5
               done
