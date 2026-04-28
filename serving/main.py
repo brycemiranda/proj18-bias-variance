@@ -123,8 +123,9 @@ class TagVectorResponse(BaseModel):
 
 @app.get("/health")
 def health():
+    healthy = bool(tag_to_vector) and _vector_dim() > 0
     return {
-        "status": "ok",
+        "status": "ok" if healthy else "degraded",
         "model_version": _model_version(),
         "artifact_bucket": loaded_model.artifact_bucket if loaded_model else None,
         "artifact_key": loaded_model.artifact_key if loaded_model else None,

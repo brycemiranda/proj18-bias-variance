@@ -51,6 +51,18 @@ def _normalize_vectors(tag_to_vector: Dict) -> Dict[str, np.ndarray]:
     return {key: np.asarray(value, dtype=np.float32) for key, value in tag_to_vector.items()}
 
 
+def _is_valid_tag_to_vector(tag_to_vector: Dict[str, np.ndarray]) -> bool:
+    if not tag_to_vector:
+        return False
+
+    first_vector = next(iter(tag_to_vector.values()), None)
+    if first_vector is None:
+        return False
+
+    array = np.asarray(first_vector, dtype=np.float32)
+    return array.ndim == 1 and array.size > 0
+
+
 def _candidate_keys() -> List[str]:
     explicit_key = (os.getenv("TAG_VECTOR_KEY") or "").strip()
     configured_candidates = [
@@ -109,6 +121,8 @@ def _format_model_version(key: str, source: str, last_modified: object = None) -
 
 def _load_local_artifacts(local_path: str) -> ModelArtifacts:
     loaded = _normalize_vectors(joblib.load(local_path))
+    if not _is_valid_tag_to_vector(loaded):
+        raise RuntimeError(f"Local tag_to_vector at {local_path} is empty or invalid")
     return ModelArtifacts(
         tag_to_vector=loaded,
         model_version=_format_model_version(os.path.basename(local_path), "local"),
@@ -139,6 +153,9 @@ def load_model_artifacts(model_dir: Optional[str] = None) -> ModelArtifacts:
                 try:
                     obj = s3.get_object(Bucket=bucket, Key=key)
                     loaded = _normalize_vectors(joblib.load(io.BytesIO(obj["Body"].read())))
+                    if not _is_valid_tag_to_vector(loaded):
+                        remote_errors.append(f"{bucket}/{key} was empty or invalid")
+                        continue
                     log.info("Loaded tag_to_vector from MinIO: %s/%s", bucket, key)
                     return ModelArtifacts(
                         tag_to_vector=loaded,

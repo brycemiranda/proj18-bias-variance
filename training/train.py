@@ -29,6 +29,7 @@ cfg = {
     "dataset":          os.environ.get("DATASET", "mealie_production_data"),
     "model_type":       "ALS",
 }
+DATA_BUCKET = os.environ.get("DATA_BUCKET", "training-data")
 
 NDCG_POS_THRESHOLD = float(os.environ.get("NDCG_POS_THRESHOLD", 1.0))
 
@@ -66,11 +67,11 @@ def load_data():
     val_path = f"datasets/{version}/val.parquet"
     print(f"Loading: {train_path}")
     with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as f:
-        s3.download_file('training-data', train_path, f.name)
+        s3.download_file(DATA_BUCKET, train_path, f.name)
         train_df = pd.read_parquet(f.name)
     print(f"Loading: {val_path}")
     with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as f:
-        s3.download_file('training-data', val_path, f.name)
+        s3.download_file(DATA_BUCKET, val_path, f.name)
         val_df = pd.read_parquet(f.name)
     print(f"Train interactions: {len(train_df):,}")
     print(f"Val interactions: {len(val_df):,}")

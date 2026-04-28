@@ -47,7 +47,7 @@ def log_event(user_id, recipe_id, event_type, rating=None, weight=0.0):
 def simulate_session(user_id):
     library = random.sample(RECIPES, random.randint(3, 6))
     try:
-        resp = requests.post(f"{FEATURE_URL}/features",
+        resp = requests.post(f"{FEATURE_URL}/recommend",
                              json={"user_id": user_id,
                                    "library_recipes": library,
                                    "top_n": 5}, timeout=5)

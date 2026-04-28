@@ -3,6 +3,8 @@ import os
 import json
 import time
 import logging
+import threading
+from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import List, Optional
 
@@ -17,8 +19,6 @@ from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
-
-app = FastAPI(title="Mealie Feature Service")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 PG_HOST       = os.environ.get("POSTGRES_HOST", "postgres.platform.svc.cluster.local")
@@ -79,15 +79,25 @@ _recipe_ids: Optional[List[str]] = None            # aligned with _recipe_vector
 _tag_to_vec: Optional[dict] = None                 # tag → np.array(50,)
 _last_reload_attempt: float = 0.0
 RELOAD_INTERVAL_SECONDS = int(os.environ.get("DISCOVERY_RELOAD_INTERVAL_SECONDS", "30"))
+_s3_client = None
+_corpus_lock = threading.Lock()
+TAG_VECTOR_KEYS = (
+    "production/tag_to_vector.pkl",
+    "canary/tag_to_vector.pkl",
+    "staging/tag_to_vector.pkl",
+)
 
 
 def s3():
-    return boto3.client(
-        's3',
-        endpoint_url=MINIO_ENDPOINT,
-        aws_access_key_id=MINIO_ACCESS,
-        aws_secret_access_key=MINIO_SECRET,
-    )
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            's3',
+            endpoint_url=MINIO_ENDPOINT,
+            aws_access_key_id=MINIO_ACCESS,
+            aws_secret_access_key=MINIO_SECRET,
+        )
+    return _s3_client
 
 
 def _restore_from_chameleon() -> dict:
@@ -156,44 +166,65 @@ def _recipe_embedding(tags: list, tag_to_vec: dict) -> np.ndarray:
     return np.mean(vecs, axis=0).astype(np.float32)
 
 
+def _load_tag_to_vec_from_minio() -> dict:
+    last_error = None
+    for key in TAG_VECTOR_KEYS:
+        try:
+            obj = s3().get_object(Bucket=MINIO_BUCKET, Key=key)
+            vectors = joblib.load(BytesIO(obj['Body'].read()))
+            if vectors:
+                log.info("  ✓ %s tags loaded from %s", len(vectors), key)
+                return vectors
+            last_error = RuntimeError(f"{key} was empty")
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(last_error or "No tag vector artifact found")
+
+
 def load_discovery_corpus():
     global _discovery_df, _recipe_vectors, _recipe_vectors_norm, _recipe_ids, _tag_to_vec
+    with _corpus_lock:
+        tag_to_vec = {}
+        discovery_df = pd.DataFrame()
+        recipe_vectors = np.zeros((0, DIM), dtype=np.float32)
+        recipe_vectors_norm = np.zeros((0, DIM), dtype=np.float32)
+        recipe_ids: list[str] = []
 
-    log.info("Loading tag_to_vector.pkl from MinIO...")
-    try:
-        obj = s3().get_object(Bucket=MINIO_BUCKET, Key='production/tag_to_vector.pkl')
-        _tag_to_vec = joblib.load(BytesIO(obj['Body'].read()))
-        log.info(f"  ✓ {len(_tag_to_vec)} tags loaded")
-    except Exception as e:
-        log.warning(f"tag_to_vector.pkl not in MinIO ({e}) — trying Chameleon object storage...")
-        _tag_to_vec = _restore_from_chameleon()
-        if not _tag_to_vec:
-            log.warning("Chameleon restore empty — trying HF Hub restore...")
-            _tag_to_vec = _restore_from_hf_hub()
+        log.info("Loading tag_to_vector.pkl from MinIO...")
+        try:
+            tag_to_vec = _load_tag_to_vec_from_minio()
+        except Exception as e:
+            log.warning(f"tag_to_vector.pkl not in MinIO ({e}) — trying Chameleon object storage...")
+            tag_to_vec = _restore_from_chameleon()
+            if not tag_to_vec:
+                log.warning("Chameleon restore empty — trying HF Hub restore...")
+                tag_to_vec = _restore_from_hf_hub()
 
-    log.info("Loading discovery_recipes.parquet from MinIO...")
-    try:
-        obj = s3().get_object(Bucket=DATA_BUCKET, Key='processed/discovery_recipes.parquet')
-        _discovery_df = pd.read_parquet(BytesIO(obj['Body'].read()))
-        _to_list = lambda t: list(t) if hasattr(t, '__iter__') and not isinstance(t, (str, float, type(None))) else []
-        _discovery_df['tags']        = _discovery_df['tags'].apply(_to_list)
-        _discovery_df['ingredients'] = _discovery_df['ingredients'].apply(_to_list)
-        _discovery_df['steps']       = _discovery_df['steps'].apply(_to_list)
-        _discovery_df['description'] = _discovery_df['description'].fillna('')
+        log.info("Loading discovery_recipes.parquet from MinIO...")
+        try:
+            obj = s3().get_object(Bucket=DATA_BUCKET, Key='processed/discovery_recipes.parquet')
+            discovery_df = pd.read_parquet(BytesIO(obj['Body'].read()))
+            _to_list = lambda t: list(t) if hasattr(t, '__iter__') and not isinstance(t, (str, float, type(None))) else []
+            discovery_df['tags']        = discovery_df['tags'].apply(_to_list)
+            discovery_df['ingredients'] = discovery_df['ingredients'].apply(_to_list)
+            discovery_df['steps']       = discovery_df['steps'].apply(_to_list)
+            discovery_df['description'] = discovery_df['description'].fillna('')
 
-        _recipe_ids = _discovery_df['recipe_id'].tolist()
-        log.info(f"  Computing recipe embeddings for {len(_recipe_ids):,} recipes...")
-        vecs = [_recipe_embedding(tags, _tag_to_vec)
-                for tags in _discovery_df['tags']]
-        _recipe_vectors = np.stack(vecs).astype(np.float32)  # (N, 50)
-        norms = np.linalg.norm(_recipe_vectors, axis=1, keepdims=True)
-        _recipe_vectors_norm = _recipe_vectors / np.where(norms > 0, norms, 1.0)
-        log.info(f"  ✓ Discovery corpus ready: {len(_recipe_ids):,} recipes")
-    except Exception as e:
-        log.warning(f"discovery_recipes.parquet not found ({e}) — discovery feed disabled")
-        _discovery_df   = pd.DataFrame()
-        _recipe_vectors = np.zeros((0, DIM), dtype=np.float32)
-        _recipe_ids     = []
+            recipe_ids = discovery_df['recipe_id'].tolist()
+            log.info(f"  Computing recipe embeddings for {len(recipe_ids):,} recipes...")
+            vecs = [_recipe_embedding(tags, tag_to_vec) for tags in discovery_df['tags']]
+            recipe_vectors = np.stack(vecs).astype(np.float32) if vecs else np.zeros((0, DIM), dtype=np.float32)
+            norms = np.linalg.norm(recipe_vectors, axis=1, keepdims=True)
+            recipe_vectors_norm = recipe_vectors / np.where(norms > 0, norms, 1.0)
+            log.info(f"  ✓ Discovery corpus ready: {len(recipe_ids):,} recipes")
+        except Exception as e:
+            log.warning(f"discovery_recipes.parquet not found ({e}) — discovery feed disabled")
+
+        _tag_to_vec = tag_to_vec
+        _discovery_df = discovery_df
+        _recipe_vectors = recipe_vectors
+        _recipe_vectors_norm = recipe_vectors_norm
+        _recipe_ids = recipe_ids
 
 
 def ensure_discovery_corpus_loaded(force: bool = False):
@@ -213,9 +244,13 @@ def ensure_discovery_corpus_loaded(force: bool = False):
     load_discovery_corpus()
 
 
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     ensure_discovery_corpus_loaded(force=True)
+    yield
+
+
+app = FastAPI(title="Mealie Feature Service", lifespan=lifespan)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -226,11 +261,10 @@ def pg():
 
 def get_user_vector(user_id: str) -> Optional[list]:
     try:
-        conn = pg()
-        cur  = conn.cursor()
-        cur.execute("SELECT taste_vector FROM user_ml_preferences WHERE user_id = %s::uuid", (user_id,))
-        row = cur.fetchone()
-        cur.close(); conn.close()
+        with pg() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT taste_vector FROM user_ml_preferences WHERE user_id = %s::uuid", (user_id,))
+                row = cur.fetchone()
         if row and row[0]:
             return row[0] if isinstance(row[0], list) else json.loads(row[0])
     except Exception as e:
@@ -265,8 +299,9 @@ class TagVectorRequest(BaseModel):
 @app.get("/health")
 def health():
     ensure_discovery_corpus_loaded()
+    healthy = bool(_tag_to_vec) and bool(_recipe_ids)
     return {
-        "status": "ok",
+        "status": "ok" if healthy else "degraded",
         "discovery_recipes": len(_recipe_ids) if _recipe_ids else 0,
         "tag_vectors": len(_tag_to_vec) if _tag_to_vec else 0,
     }
@@ -466,15 +501,14 @@ def auto_tag(req: AutoTagRequest):
 @app.post("/log_event")
 def log_event(req: EventRequest):
     try:
-        conn = pg()
-        cur  = conn.cursor()
-        cur.execute(
-            """INSERT INTO mealie_events
-               (user_id, recipe_id, event_type, rating, weight)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (req.user_id, req.recipe_id, req.event_type, req.rating, req.weight),
-        )
-        conn.commit(); cur.close(); conn.close()
+        with pg() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO mealie_events
+                       (user_id, recipe_id, event_type, rating, weight)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (req.user_id, req.recipe_id, req.event_type, req.rating, req.weight),
+                )
     except Exception as e:
         log.error(f"Failed to log event: {e}")
         raise HTTPException(status_code=500, detail="Event logging failed")

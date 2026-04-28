@@ -13,7 +13,7 @@ RUN yarn install \
 
 RUN yarn generate
 
-FROM ghcr.io/mealie-recipes/mealie:v2.2.0
+FROM ghcr.io/mealie-recipes/mealie:v3.16.0
 
 COPY mealie /tmp/mealie-src
 COPY --from=frontend-builder /frontend/dist /tmp/mealie-frontend

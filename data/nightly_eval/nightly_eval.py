@@ -325,7 +325,9 @@ def check_model_quality():
         return metrics
 
     user_counts = train.groupby('user_id').size()
-    cold_users  = user_counts[user_counts == 0].index.tolist()  # never in train
+    train_users = set(train['user_id'].astype(str).unique())
+    val_users = set(val['user_id'].astype(str).unique())
+    cold_users  = sorted(val_users - train_users)
     few_users   = user_counts[(user_counts >= 1) & (user_counts <= 4)].index.tolist()
     many_users  = user_counts[user_counts >= 5].index.tolist()
 
@@ -435,6 +437,7 @@ def check_model_quality():
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main():
+    failed_checks.clear()
     print(f"=== Nightly Eval | {datetime.now().isoformat()} ===")
 
     mlflow_available = True

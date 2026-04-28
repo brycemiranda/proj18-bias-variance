@@ -84,6 +84,8 @@ def rank_recipes(
 ) -> List[Dict]:
     scored: List[Dict] = []
     vector_dim = int(user_vector.shape[0]) if user_vector.ndim else DEFAULT_VECTOR_DIM
+    user_norm = float(np.linalg.norm(user_vector))
+    normalized_user_vector = user_vector / user_norm if user_norm > 0 else np.zeros_like(user_vector, dtype=np.float32)
 
     for recipe in library_recipes:
         recipe_id = recipe.get("recipe_id")
@@ -102,7 +104,11 @@ def rank_recipes(
                 recipe_cache[recipe_id] = recipe_vector
 
         matched = [tag for tag in recipe.get("tags", []) if tag in tag_to_vector]
-        score = float(np.dot(user_vector, recipe_vector))
+        recipe_norm = float(np.linalg.norm(recipe_vector))
+        if recipe_norm > 0 and user_norm > 0:
+            score = float(np.dot(normalized_user_vector, recipe_vector / recipe_norm))
+        else:
+            score = 0.0
         scored.append(
             {
                 "recipe_id": recipe.get("recipe_id"),
