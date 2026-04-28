@@ -444,7 +444,7 @@ spec:
     targetRevision: ${TARGET_REVISION}
     path: k8s/monitoring
     directory:
-      exclude: '{metrics-server.yaml,monitoring-namespace.yaml}'
+      exclude: '{metrics-server.yaml,monitoring-namespace.yaml,alert-rules.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
