@@ -206,7 +206,8 @@ recreate_job_from_manifest() {
   local manifest_path="$1"
   local namespace="$2"
   local job_name="$3"
-  kubectl delete job "${job_name}" -n "${namespace}" --ignore-not-found=true
+  kubectl delete job "${job_name}" -n "${namespace}" --ignore-not-found=true --wait=false || true
+  kubectl wait --for=delete "job/${job_name}" -n "${namespace}" --timeout=120s >/dev/null 2>&1 || true
   kubectl apply -f "${manifest_path}"
 }
 
