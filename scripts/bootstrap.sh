@@ -10,6 +10,8 @@ SECRETS_FILE="${SECRETS_FILE:-scripts/secrets.env}"
 RUN_INGESTION_JOB="${RUN_INGESTION_JOB:-0}"
 RUN_BATCH_BOOTSTRAP="${RUN_BATCH_BOOTSTRAP:-0}"
 RUN_TRAIN_BOOTSTRAP="${RUN_TRAIN_BOOTSTRAP:-0}"
+BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
+K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -51,6 +53,29 @@ detect_docker() {
 
   echo "Error: Docker is installed but not usable by the current user."
   exit 1
+}
+
+scale_resource() {
+  local namespace="$1"
+  local kind="$2"
+  local name="$3"
+  local replicas="$4"
+  kubectl scale "${kind}/${name}" -n "${namespace}" --replicas="${replicas}" >/dev/null 2>&1 || true
+}
+
+wait_for_no_pods() {
+  local namespace="$1"
+  local selector="$2"
+  local timeout="${3:-180}"
+  local elapsed=0
+  while kubectl get pods -n "${namespace}" -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
+    sleep 5
+    elapsed=$((elapsed + 5))
+    if [ "${elapsed}" -ge "${timeout}" ]; then
+      echo "Warning: pods with selector ${selector} in namespace ${namespace} did not terminate within ${timeout}s."
+      return 1
+    fi
+  done
 }
 
 kubectl() {
@@ -141,11 +166,128 @@ detect_node_ip() {
   echo "127.0.0.1"
 }
 
+current_claim_dir() {
+  local namespace="$1"
+  local claim_name="$2"
+  local pv_name
+  pv_name="$(kubectl get pvc "${claim_name}" -n "${namespace}" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)"
+  if [ -z "${pv_name}" ]; then
+    return
+  fi
+  echo "${K8S_STORAGE_DIR}/${pv_name}_${namespace}_${claim_name}"
+}
+
+find_restore_source_dir() {
+  local namespace="$1"
+  local claim_name="$2"
+  local current_dir="$3"
+  local dir best_dir=""
+  local best_size=0
+  local size=0
+
+  shopt -s nullglob
+  for dir in "${K8S_STORAGE_DIR}"/pvc-*_"${namespace}"_"${claim_name}"; do
+    [ -d "${dir}" ] || continue
+    [ "${dir}" = "${current_dir}" ] && continue
+    size="$(sudo du -s "${dir}" 2>/dev/null | awk '{print $1}')"
+    size="${size:-0}"
+    if [ "${size}" -gt "${best_size}" ]; then
+      best_size="${size}"
+      best_dir="${dir}"
+    fi
+  done
+  shopt -u nullglob
+
+  echo "${best_dir}"
+}
+
+promote_staging_model_on_disk() {
+  local minio_dir="$1"
+  local staging="${minio_dir}/mlflow-artifacts/staging/tag_to_vector.pkl"
+  local production_parent="${minio_dir}/mlflow-artifacts/production"
+  local production="${production_parent}/tag_to_vector.pkl"
+
+  if [ -d "${staging}" ] && [ ! -e "${production}" ]; then
+    echo "Promoting staging/tag_to_vector.pkl to production on restored MinIO data..."
+    sudo mkdir -p "${production_parent}"
+    sudo cp -a "${staging}" "${production}"
+  fi
+}
+
+restore_claim_from_previous_pvc() {
+  local namespace="$1"
+  local claim_name="$2"
+  local current_dir="$3"
+  local source_dir="$4"
+  local current_size source_size
+
+  [ -d "${current_dir}" ] || return
+  [ -d "${source_dir}" ] || return
+
+  current_size="$(sudo du -s "${current_dir}" 2>/dev/null | awk '{print $1}')"
+  source_size="$(sudo du -s "${source_dir}" 2>/dev/null | awk '{print $1}')"
+  current_size="${current_size:-0}"
+  source_size="${source_size:-0}"
+
+  if [ "${source_size}" -le "${current_size}" ]; then
+    echo "Skipping restore for ${namespace}/${claim_name}; current PVC data is already at least as large as the previous snapshot."
+    return
+  fi
+
+  echo "Restoring ${namespace}/${claim_name} from:"
+  echo "  ${source_dir}"
+  echo "into:"
+  echo "  ${current_dir}"
+  sudo rsync -aHAX --delete "${source_dir}/" "${current_dir}/"
+
+  if [ "${namespace}/${claim_name}" = "platform/minio-pvc" ]; then
+    promote_staging_model_on_disk "${current_dir}"
+  fi
+}
+
+restore_previous_persistent_state() {
+  if [ ! -d "${K8S_STORAGE_DIR}" ]; then
+    echo "=== No persistent storage directory at ${K8S_STORAGE_DIR}; skipping PVC restore ==="
+    return
+  fi
+
+  echo "=== Restoring previous PVC data from ${K8S_STORAGE_DIR} when available ==="
+
+  scale_resource platform deployment minio 0
+  scale_resource platform deployment mlflow 0
+  scale_resource mealie deployment mealie-app 0
+  scale_resource platform statefulset postgres 0
+
+  wait_for_no_pods platform app=minio 180 || true
+  wait_for_no_pods platform app=mlflow 180 || true
+  wait_for_no_pods mealie app=mealie-app 180 || true
+  wait_for_no_pods platform app=postgres 180 || true
+
+  local claim namespace current_dir source_dir namespace_claim
+  for namespace_claim in "platform:minio-pvc" "platform:postgres-pvc" "platform:mlflow-pvc" "mealie:mealie-pvc"; do
+    namespace="${namespace_claim%%:*}"
+    claim="${namespace_claim##*:}"
+    current_dir="$(current_claim_dir "${namespace}" "${claim}")"
+    [ -n "${current_dir}" ] || continue
+    source_dir="$(find_restore_source_dir "${namespace}" "${claim}" "${current_dir}")"
+    if [ -n "${source_dir}" ]; then
+      restore_claim_from_previous_pvc "${namespace}" "${claim}" "${current_dir}" "${source_dir}"
+    else
+      echo "No previous PVC snapshot found for ${namespace}/${claim}; leaving current claim as-is."
+    fi
+  done
+
+  scale_resource platform statefulset postgres 1
+  scale_resource platform deployment minio 1
+  scale_resource platform deployment mlflow 1
+  scale_resource mealie deployment mealie-app 1
+}
+
 setup_persistent_storage() {
   echo "=== Setting up persistent block storage ==="
   local block_device="${BLOCK_DEVICE:-/dev/vdb}"
-  local block_mount="${BLOCK_MOUNT:-/mnt/block}"
-  local k8s_storage_path="${block_mount}/k8s-storage/storage"
+  local block_mount="${BLOCK_MOUNT_DIR}"
+  local k8s_storage_path="${K8S_STORAGE_DIR}"
 
   if lsblk | grep -q "$(basename "${block_device}")"; then
     echo "Block device ${block_device} found - configuring persistent storage..."
@@ -386,6 +528,7 @@ open_firewall_ports() {
 
 require_cmd sudo
 require_cmd k3s
+require_cmd rsync
 detect_kubectl
 detect_docker
 load_secrets_file
@@ -432,6 +575,9 @@ fi
 echo "=== Deploying platform services ==="
 kubectl apply -f k8s/platform/postgres-statefulset.yaml
 kubectl apply -f k8s/platform/minio-deployment.yaml
+kubectl rollout status statefulset/postgres -n platform --timeout=300s
+kubectl rollout status deployment/minio -n platform --timeout=300s
+restore_previous_persistent_state
 kubectl rollout status statefulset/postgres -n platform --timeout=300s
 kubectl rollout status deployment/minio -n platform --timeout=300s
 bootstrap_postgres
