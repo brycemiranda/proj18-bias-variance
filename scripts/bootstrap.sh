@@ -12,6 +12,7 @@ RUN_BATCH_BOOTSTRAP="${RUN_BATCH_BOOTSTRAP:-0}"
 RUN_TRAIN_BOOTSTRAP="${RUN_TRAIN_BOOTSTRAP:-0}"
 BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
 K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
+RESTART_LOCAL_WORKLOADS="${RESTART_LOCAL_WORKLOADS:-0}"
 RESTART_INFERENCE_API=0
 RESTART_INFERENCE_API_CANARY=0
 RESTART_FEATURE_SERVICE=0
@@ -97,6 +98,13 @@ deployment_exists() {
 }
 
 capture_existing_local_workloads() {
+  if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
+    RESTART_INFERENCE_API=0
+    RESTART_INFERENCE_API_CANARY=0
+    RESTART_FEATURE_SERVICE=0
+    RESTART_MEALIE_APP=0
+    return
+  fi
   deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
   deployment_exists serving inference-api-canary && RESTART_INFERENCE_API_CANARY=1 || RESTART_INFERENCE_API_CANARY=0
   deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
@@ -116,6 +124,50 @@ wait_for_job() {
   local job_name="$2"
   local timeout="$3"
   kubectl wait --for=condition=complete "job/${job_name}" -n "${namespace}" --timeout="${timeout}"
+}
+
+force_delete_terminating_pods() {
+  local namespace="$1"
+  local selector="$2"
+  local pod_name deletion_ts
+
+  while IFS='|' read -r pod_name deletion_ts; do
+    [ -n "${pod_name}" ] || continue
+    if [ -n "${deletion_ts}" ]; then
+      echo "Force deleting stuck terminating pod ${namespace}/${pod_name}"
+      kubectl delete pod "${pod_name}" -n "${namespace}" --force --grace-period=0 >/dev/null 2>&1 || true
+    fi
+  done < <(kubectl get pods -n "${namespace}" -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null || true)
+}
+
+wait_for_deployment_rollout_with_cleanup() {
+  local namespace="$1"
+  local name="$2"
+  local selector="$3"
+  local timeout="${4:-300}"
+  local deadline remaining slice
+
+  deadline=$((SECONDS + timeout))
+
+  while true; do
+    remaining=$((deadline - SECONDS))
+    if [ "${remaining}" -le 0 ]; then
+      echo "Error: deployment/${name} in namespace ${namespace} did not finish rolling out within ${timeout}s."
+      exit 1
+    fi
+
+    slice="${remaining}"
+    if [ "${slice}" -gt 60 ]; then
+      slice=60
+    fi
+
+    if kubectl rollout status "deployment/${name}" -n "${namespace}" --timeout="${slice}s"; then
+      return
+    fi
+
+    force_delete_terminating_pods "${namespace}" "${selector}"
+    sleep 5
+  done
 }
 
 recreate_job_from_manifest() {
@@ -757,10 +809,10 @@ kubectl apply -f k8s/mealie/mealie-deployment.yaml
 
 restart_local_image_workloads
 
-kubectl rollout status deployment/inference-api -n serving --timeout=300s
-kubectl rollout status deployment/inference-api-canary -n serving --timeout=300s || true
-kubectl rollout status deployment/feature-service -n data --timeout=300s
-kubectl rollout status deployment/mealie-app -n mealie --timeout=600s
+wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300
+wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300 || true
+wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 300
+wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
 
 maybe_run_bootstrap_jobs
 deploy_monitoring

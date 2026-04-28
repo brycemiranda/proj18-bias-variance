@@ -9,6 +9,7 @@ EXPLICIT_HOST_IP="${1:-${FLOATING_IP:-${HOST_IP:-}}}"
 SECRETS_FILE="${SECRETS_FILE:-scripts/secrets.env}"
 BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
 K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
+RESTART_LOCAL_WORKLOADS="${RESTART_LOCAL_WORKLOADS:-0}"
 RESTART_INFERENCE_API=0
 RESTART_FEATURE_SERVICE=0
 RESTART_MEALIE_APP=0
@@ -86,6 +87,14 @@ docker_cmd() {
   "${DOCKER_BIN[@]}" "$@"
 }
 
+env_flag() {
+  local value="${1:-}"
+  case "${value,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 deployment_exists() {
   local namespace="$1"
   local name="$2"
@@ -93,6 +102,12 @@ deployment_exists() {
 }
 
 capture_existing_local_workloads() {
+  if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
+    RESTART_INFERENCE_API=0
+    RESTART_FEATURE_SERVICE=0
+    RESTART_MEALIE_APP=0
+    return
+  fi
   deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
   deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
   deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
@@ -402,6 +417,51 @@ wait_for_rollout() {
   local timeout="${4:-300}"
   wait_for_resource "${namespace}" "${kind}" "${name}" "${timeout}"
   kubectl rollout status "${kind}/${name}" -n "${namespace}" --timeout="${timeout}s"
+}
+
+force_delete_terminating_pods() {
+  local namespace="$1"
+  local selector="$2"
+  local pod_name deletion_ts
+
+  while IFS='|' read -r pod_name deletion_ts; do
+    [ -n "${pod_name}" ] || continue
+    if [ -n "${deletion_ts}" ]; then
+      echo "Force deleting stuck terminating pod ${namespace}/${pod_name}"
+      kubectl delete pod "${pod_name}" -n "${namespace}" --force --grace-period=0 >/dev/null 2>&1 || true
+    fi
+  done < <(kubectl get pods -n "${namespace}" -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null || true)
+}
+
+wait_for_deployment_rollout_with_cleanup() {
+  local namespace="$1"
+  local name="$2"
+  local selector="$3"
+  local timeout="${4:-300}"
+  local deadline remaining slice
+
+  wait_for_resource "${namespace}" deployment "${name}" "${timeout}"
+  deadline=$((SECONDS + timeout))
+
+  while true; do
+    remaining=$((deadline - SECONDS))
+    if [ "${remaining}" -le 0 ]; then
+      echo "Error: deployment/${name} in namespace ${namespace} did not finish rolling out within ${timeout}s."
+      exit 1
+    fi
+
+    slice="${remaining}"
+    if [ "${slice}" -gt 60 ]; then
+      slice=60
+    fi
+
+    if kubectl rollout status "deployment/${name}" -n "${namespace}" --timeout="${slice}s"; then
+      return
+    fi
+
+    force_delete_terminating_pods "${namespace}" "${selector}"
+    sleep 5
+  done
 }
 
 wait_for_job() {
@@ -853,9 +913,9 @@ seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
 restart_local_image_workloads
 wait_for_rollout platform deployment mlflow 600
-wait_for_rollout serving deployment inference-api 600
-wait_for_rollout data deployment feature-service 600
-wait_for_rollout mealie deployment mealie-app 600
+wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 600
+wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 600
+wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
 wait_for_rollout monitoring deployment prometheus 600
 wait_for_rollout monitoring deployment grafana 600
 
