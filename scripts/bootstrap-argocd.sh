@@ -443,6 +443,8 @@ spec:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
     path: k8s/monitoring
+    directory:
+      exclude: '{metrics-server.yaml,monitoring-namespace.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
