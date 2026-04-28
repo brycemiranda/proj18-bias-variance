@@ -210,6 +210,53 @@ EOF
   fi
 }
 
+initialize_minio_buckets() {
+  echo "=== Initializing MinIO buckets ==="
+  local job_name="minio-init-$(date +%s)"
+  cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${job_name}
+  namespace: platform
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: minio-init
+          image: minio/mc:latest
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: accesskey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secretkey
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              until mc alias set local http://minio-service.platform.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "Waiting for MinIO..."
+                sleep 5
+              done
+              mc mb -p local/mlflow-artifacts || true
+              mc mb -p local/mlflow || true
+              mc mb -p local/training-data || true
+              mc mb -p local/feature-store || true
+              mc mb -p local/inference-logs || true
+              echo "Buckets ready."
+EOF
+  wait_for_job platform "${job_name}" 240s
+  kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+}
+
 seed_production_model() {
   echo "=== Promoting staging tag vectors to canary and production ==="
   kubectl delete job seed-production-model -n training --ignore-not-found=true
@@ -366,9 +413,7 @@ kubectl rollout status statefulset/postgres -n platform --timeout=300s
 kubectl rollout status deployment/minio -n platform --timeout=300s
 bootstrap_postgres
 
-echo "=== Initializing MinIO buckets ==="
-recreate_job_from_manifest k8s/platform/minio-init-job.yaml platform minio-init
-wait_for_job platform minio-init 240s
+initialize_minio_buckets
 
 echo "=== Deploying MLflow ==="
 kubectl apply -f k8s/platform/mlflow-deployment.yaml
