@@ -530,6 +530,19 @@ bootstrap_postgres() {
   ' < data/init.sql
 }
 
+reconcile_postgres_role_password() {
+  echo "=== Reconciling PostgreSQL role password with postgres-secret ==="
+  kubectl exec -n platform postgres-0 -- sh -lc '
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    psql -v ON_ERROR_STOP=1 \
+         -v dbuser="$POSTGRES_USER" \
+         -v dbpass="$POSTGRES_PASSWORD" \
+         -U "$POSTGRES_USER" \
+         -d postgres \
+         -c "ALTER ROLE :\"dbuser\" WITH PASSWORD :'dbpass';"
+  '
+}
+
 postgres_query_scalar() {
   local db="$1"
   local sql="$2"
@@ -1009,7 +1022,9 @@ restore_previous_persistent_state
 wait_for_rollout platform statefulset postgres 600
 wait_for_rollout platform deployment minio 600
 bootstrap_postgres
+reconcile_postgres_role_password
 restore_postgres_mlflow_snapshot_if_needed
+reconcile_postgres_role_password
 initialize_minio_buckets
 seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
