@@ -214,12 +214,27 @@ promote_staging_model_on_disk() {
   fi
 }
 
+minio_has_recovery_artifacts() {
+  local minio_dir="$1"
+
+  [ -d "${minio_dir}" ] || return 1
+  [ -d "${minio_dir}/training-data/processed/discovery_recipes.parquet" ] || return 1
+
+  if [ -d "${minio_dir}/mlflow-artifacts/production/tag_to_vector.pkl" ] || \
+     [ -d "${minio_dir}/mlflow-artifacts/canary/tag_to_vector.pkl" ] || \
+     [ -d "${minio_dir}/mlflow-artifacts/staging/tag_to_vector.pkl" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
 restore_claim_from_previous_pvc() {
   local namespace="$1"
   local claim_name="$2"
   local current_dir="$3"
   local source_dir="$4"
-  local current_size source_size
+  local current_size source_size force_restore=0
 
   [ -d "${current_dir}" ] || return
   [ -d "${source_dir}" ] || return
@@ -229,8 +244,17 @@ restore_claim_from_previous_pvc() {
   current_size="${current_size:-0}"
   source_size="${source_size:-0}"
 
-  if [ "${source_size}" -le "${current_size}" ]; then
+  if [ "${namespace}/${claim_name}" = "platform/minio-pvc" ] && \
+     minio_has_recovery_artifacts "${source_dir}" && \
+     ! minio_has_recovery_artifacts "${current_dir}"; then
+    force_restore=1
+  fi
+
+  if [ "${force_restore}" -eq 0 ] && [ "${source_size}" -le "${current_size}" ]; then
     echo "Skipping restore for ${namespace}/${claim_name}; current PVC data is already at least as large as the previous snapshot."
+    if [ "${namespace}/${claim_name}" = "platform/minio-pvc" ]; then
+      promote_staging_model_on_disk "${current_dir}"
+    fi
     return
   fi
 
