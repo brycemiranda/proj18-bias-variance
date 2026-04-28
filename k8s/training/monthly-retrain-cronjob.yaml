@@ -54,6 +54,42 @@ spec:
                       key: password
                 - name: NDCG_THRESHOLD
                   value: "0.0001"
+                - name: CHAMELEON_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: CHAMELEON_ENDPOINT
+                      optional: true
+                - name: CHAMELEON_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: CHAMELEON_ACCESS_KEY
+                      optional: true
+                - name: CHAMELEON_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: CHAMELEON_SECRET_KEY
+                      optional: true
+                - name: CHAMELEON_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: CHAMELEON_BUCKET
+                      optional: true
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: HF_TOKEN
+                      optional: true
+                - name: HF_REPO
+                  valueFrom:
+                    secretKeyRef:
+                      name: artifact-restore-secret
+                      key: HF_REPO
+                      optional: true
               resources:
                 requests:
                   cpu: "100m"

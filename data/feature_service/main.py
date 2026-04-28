@@ -105,12 +105,23 @@ def _restore_from_chameleon() -> dict:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
         )
-        obj = client.get_object(Bucket=bucket, Key="tag_to_vector.pkl")
-        vec = joblib.load(BytesIO(obj['Body'].read()))
+        last_error = None
+        vec = {}
+        key_used = None
+        for key in ("artifacts/tag_to_vector.pkl", "tag_to_vector.pkl"):
+            try:
+                obj = client.get_object(Bucket=bucket, Key=key)
+                vec = joblib.load(BytesIO(obj['Body'].read()))
+                key_used = key
+                break
+            except Exception as exc:
+                last_error = exc
+        if not vec:
+            raise RuntimeError(last_error or "No Chameleon backup key matched")
         buf = BytesIO()
         joblib.dump(vec, buf); buf.seek(0)
         s3().put_object(Bucket=MINIO_BUCKET, Key="production/tag_to_vector.pkl", Body=buf.read())
-        log.info("✓ Restored tag_to_vector.pkl from Chameleon object storage → seeded MinIO production/")
+        log.info("✓ Restored tag_to_vector.pkl from Chameleon object storage key %s → seeded MinIO production/", key_used)
         return vec
     except Exception as exc:
         log.warning("Chameleon restore failed: %s", exc)

@@ -317,8 +317,10 @@ def _push_to_chameleon(tag_to_vector: dict, mappings: dict) -> None:
                     "user2idx":   {str(k): v for k, v in mappings["user2idx"].items()},
                     "recipe2idx": {str(k): v for k, v in mappings["recipe2idx"].items()},
                 }, f)
-            client.upload_file(pkl_path, bucket, "tag_to_vector.pkl")
-            client.upload_file(map_path, bucket, "mappings.json")
+            for key in ("tag_to_vector.pkl", "artifacts/tag_to_vector.pkl"):
+                client.upload_file(pkl_path, bucket, key)
+            for key in ("mappings.json", "artifacts/mappings.json"):
+                client.upload_file(map_path, bucket, key)
         print(f"✓ Artifacts backed up to Chameleon object storage: {bucket}")
     except Exception as exc:
         print(f"Chameleon backup failed (non-fatal): {exc}")

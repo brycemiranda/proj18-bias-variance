@@ -456,6 +456,103 @@ EOF
   kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
 }
 
+seed_minio_from_chameleon_backup() {
+  if [ -z "${CHAMELEON_ENDPOINT:-}" ] || [ -z "${CHAMELEON_ACCESS_KEY:-}" ] || [ -z "${CHAMELEON_SECRET_KEY:-}" ]; then
+    echo "=== Chameleon backup credentials not set; skipping MinIO artifact reseed ==="
+    return
+  fi
+
+  echo "=== Seeding MinIO production artifact from Chameleon object storage backup ==="
+  local job_name="seed-minio-from-chameleon-$(date +%s)"
+  local bucket="${CHAMELEON_BUCKET:-proj18-ml-artifacts}"
+
+  cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${job_name}
+  namespace: platform
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed-minio
+          image: proj18biasvariance/mealie-als-training:local
+          imagePullPolicy: Never
+          env:
+            - name: CHAMELEON_ENDPOINT
+              value: "${CHAMELEON_ENDPOINT}"
+            - name: CHAMELEON_ACCESS_KEY
+              value: "${CHAMELEON_ACCESS_KEY}"
+            - name: CHAMELEON_SECRET_KEY
+              value: "${CHAMELEON_SECRET_KEY}"
+            - name: CHAMELEON_BUCKET
+              value: "${bucket}"
+            - name: MINIO_ENDPOINT
+              value: http://minio-service.platform.svc.cluster.local:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: accesskey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secretkey
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python - <<'PY'
+              import os
+              import boto3
+
+              source = boto3.client(
+                  "s3",
+                  endpoint_url=os.environ["CHAMELEON_ENDPOINT"],
+                  aws_access_key_id=os.environ["CHAMELEON_ACCESS_KEY"],
+                  aws_secret_access_key=os.environ["CHAMELEON_SECRET_KEY"],
+              )
+              target = boto3.client(
+                  "s3",
+                  endpoint_url=os.environ["MINIO_ENDPOINT"],
+                  aws_access_key_id=os.environ["MINIO_ACCESS_KEY"],
+                  aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
+              )
+
+              bucket = os.environ["CHAMELEON_BUCKET"]
+              payload = None
+              key_used = None
+              last_error = None
+              for key in ("artifacts/tag_to_vector.pkl", "tag_to_vector.pkl"):
+                  try:
+                      payload = source.get_object(Bucket=bucket, Key=key)["Body"].read()
+                      key_used = key
+                      break
+                  except Exception as exc:
+                      last_error = exc
+
+              if payload is None:
+                  raise RuntimeError(f"Could not restore from Chameleon backup bucket {bucket}: {last_error}")
+
+              for key in (
+                  "production/tag_to_vector.pkl",
+                  "canary/tag_to_vector.pkl",
+                  "staging/tag_to_vector.pkl",
+              ):
+                  target.put_object(Bucket="mlflow-artifacts", Key=key, Body=payload)
+
+              print(f"Seeded MinIO from Chameleon backup key {key_used} ({len(payload)} bytes)")
+              PY
+EOF
+  wait_for_job platform "${job_name}" 300s
+  kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+}
+
 restart_local_image_workloads() {
   echo "=== Restarting local-image workloads ==="
   kubectl rollout restart deployment/inference-api -n serving || true
@@ -699,6 +796,7 @@ wait_for_rollout platform statefulset postgres 600
 wait_for_rollout platform deployment minio 600
 bootstrap_postgres
 initialize_minio_buckets
+seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
 restart_local_image_workloads
 wait_for_rollout platform deployment mlflow 600

@@ -40,6 +40,12 @@ fi
 : "${MINIO_SECRET_KEY:=}"
 : "${GRAFANA_ADMIN_PASSWORD:=}"
 : "${KAGGLE_TOKEN:=}"
+: "${CHAMELEON_ENDPOINT:=}"
+: "${CHAMELEON_ACCESS_KEY:=}"
+: "${CHAMELEON_SECRET_KEY:=}"
+: "${CHAMELEON_BUCKET:=}"
+: "${HF_TOKEN:=}"
+: "${HF_REPO:=}"
 
 if [ -z "${DB_USERNAME}" ]; then
   read -rp "Enter PostgreSQL username: " DB_USERNAME
@@ -123,6 +129,26 @@ type: Opaque
 stringData:
   token: "${KAGGLE_TOKEN}"
 INNER
+fi
+
+if [ -n "${CHAMELEON_ENDPOINT}${CHAMELEON_ACCESS_KEY}${CHAMELEON_SECRET_KEY}${CHAMELEON_BUCKET}${HF_TOKEN}${HF_REPO}" ]; then
+  for ns in data training; do
+    cat <<INNER | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: artifact-restore-secret
+  namespace: ${ns}
+type: Opaque
+stringData:
+  CHAMELEON_ENDPOINT: "${CHAMELEON_ENDPOINT}"
+  CHAMELEON_ACCESS_KEY: "${CHAMELEON_ACCESS_KEY}"
+  CHAMELEON_SECRET_KEY: "${CHAMELEON_SECRET_KEY}"
+  CHAMELEON_BUCKET: "${CHAMELEON_BUCKET}"
+  HF_TOKEN: "${HF_TOKEN}"
+  HF_REPO: "${HF_REPO}"
+INNER
+  done
 fi
 
 echo "Secrets created/updated successfully."
