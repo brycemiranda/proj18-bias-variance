@@ -284,49 +284,55 @@ def discovery(
 ):
     """
     Return ranked Food.com recipes for the discovery feed.
-    Ranking: dot product of user taste vector × pre-computed recipe embeddings.
+    Ranking: cosine similarity of user taste vector × pre-computed recipe embeddings.
     Cold-start (no vector): filter by category only, return in stable order.
     """
     if _discovery_df is None or len(_recipe_ids) == 0:
         return {"items": [], "page": page, "total": 0, "cold_start": True}
 
-    df = _discovery_df.copy()
-    norm_vectors = _recipe_vectors_norm
-
-    # Category filter — single category takes precedence, then multi-category from onboarding
+    # Build mask without copying the full 150k-row DataFrame
+    mask = None
     if category and category in CATEGORIES:
-        mask = df['category'] == category
-        df           = df[mask].reset_index(drop=True)
-        norm_vectors = _recipe_vectors_norm[mask.values]
+        mask = (_discovery_df['category'] == category).values
     elif categories:
         cat_list = [c.strip() for c in categories.split(',') if c.strip() in CATEGORIES]
         if cat_list:
-            mask = df['category'].isin(cat_list)
-            df           = df[mask].reset_index(drop=True)
-            norm_vectors = _recipe_vectors_norm[mask.values]
+            mask = _discovery_df['category'].isin(cat_list).values
+
+    if mask is not None:
+        df = _discovery_df[mask]
+        norm_vectors = _recipe_vectors_norm[mask]
+    else:
+        df = _discovery_df
+        norm_vectors = _recipe_vectors_norm
 
     user_vec = get_user_vector(user_id)
     cold_start = user_vec is None
 
     if cold_start or all(v == 0.0 for v in user_vec):
-        # No taste vector yet — return stable order within category
-        ranked_df = df
+        order = None
+        page_scores = None
     else:
         uv = np.array(user_vec, dtype=np.float32)
         uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
         scores = norm_vectors @ uv_norm                # cosine similarity in [-1, 1]
         scores = np.clip(scores, 0.0, 1.0)            # clip negatives to 0 for display
-        order  = np.argsort(-scores)                   # descending
-        ranked_df = df.iloc[order].reset_index(drop=True)
-        ranked_df['_score'] = scores[order]
+        order = np.argsort(-scores)                    # descending
+        page_scores = scores[order]
 
-    total  = len(ranked_df)
-    start  = (page - 1) * page_size
-    end    = start + page_size
-    page_df = ranked_df.iloc[start:end]
+    total = len(df)
+    start = (page - 1) * page_size
+    end   = start + page_size
+
+    if order is not None:
+        page_df     = df.iloc[order[start:end]]
+        score_slice = page_scores[start:end]
+    else:
+        page_df     = df.iloc[start:end]
+        score_slice = None
 
     items = []
-    for _, row in page_df.iterrows():
+    for i, (_, row) in enumerate(page_df.iterrows()):
         items.append({
             "recipe_id":   row['recipe_id'],
             "name":        row['name'],
@@ -335,7 +341,7 @@ def discovery(
             "tags":        row['tags'][:10],
             "ingredients": row['ingredients'],
             "steps":       row['steps'],
-            "score":       float(row.get('_score', 0.0)),
+            "score":       float(score_slice[i]) if score_slice is not None else 0.0,
         })
 
     return {"items": items, "page": page, "total": total, "cold_start": cold_start}
