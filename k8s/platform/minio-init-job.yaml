@@ -3,6 +3,9 @@ kind: Job
 metadata:
   name: minio-init
   namespace: platform
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   template:
     spec:
@@ -31,6 +34,7 @@ spec:
                 sleep 5
               done
               mc mb -p local/mlflow-artifacts || true
+              mc mb -p local/mlflow || true
               mc mb -p local/training-data || true
               mc mb -p local/feature-store || true
               mc mb -p local/inference-logs || true

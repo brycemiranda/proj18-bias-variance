@@ -14,8 +14,8 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: nightly-eval
-              image: mahimamariah/mealie-nightly-eval:latest
-              imagePullPolicy: Always
+              image: proj18biasvariance/mealie-nightly-eval:local
+              imagePullPolicy: Never
               env:
                 - name: MINIO_ENDPOINT
                   value: http://minio-service.platform.svc.cluster.local:9000

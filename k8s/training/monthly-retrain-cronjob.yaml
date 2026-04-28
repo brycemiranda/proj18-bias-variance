@@ -12,7 +12,8 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: monthly-retrain
-              image: bm3986/mealie-als-training:latest
+              image: proj18biasvariance/mealie-als-training:local
+              imagePullPolicy: Never
               args:
                 - python
                 - train.py

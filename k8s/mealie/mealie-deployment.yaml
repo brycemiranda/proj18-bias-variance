@@ -27,7 +27,8 @@ spec:
     spec:
       containers:
         - name: mealie
-          image: proj18biasvariance/mealie-custom:latest
+          image: proj18biasvariance/mealie-custom:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 9000
           startupProbe:

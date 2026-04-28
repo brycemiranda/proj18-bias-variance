@@ -1,4 +1,5 @@
 .env
+scripts/secrets.env
 *.pkl
 *.parquet
 __pycache__/

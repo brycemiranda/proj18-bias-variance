@@ -56,12 +56,12 @@ data:
 
       - job_name: mealie-api
         static_configs:
-          - targets: ['mealie.mealie.svc.cluster.local:9000']
+          - targets: ['mealie-service.mealie.svc.cluster.local:9000']
         metrics_path: /api/metrics
 
       - job_name: inference-api
         static_configs:
-          - targets: ['inference-api.serving.svc.cluster.local:8000']
+          - targets: ['inference-service.serving.svc.cluster.local:8000']
         metrics_path: /metrics
 
       - job_name: mlflow

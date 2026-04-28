@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: inference-api-canary
-          image: mahimamariah/mealie-serving:latest
+          image: proj18biasvariance/mealie-serving:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           startupProbe:

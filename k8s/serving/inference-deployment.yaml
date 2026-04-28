@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: inference-api
-          image: mahimamariah/mealie-serving:latest
+          image: proj18biasvariance/mealie-serving:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           startupProbe:
@@ -81,9 +82,10 @@ metadata:
   name: inference-service
   namespace: serving
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: inference-api
   ports:
     - port: 8000
       targetPort: 8000
+      nodePort: 30800
