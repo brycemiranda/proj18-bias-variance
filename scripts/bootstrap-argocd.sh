@@ -530,6 +530,74 @@ bootstrap_postgres() {
   ' < data/init.sql
 }
 
+postgres_query_scalar() {
+  local db="$1"
+  local sql="$2"
+  local value=""
+
+  value="$(kubectl exec -n platform postgres-0 -- env DB_NAME="${db}" SQL_QUERY="${sql}" sh -lc '
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    psql -U "$POSTGRES_USER" -d "$DB_NAME" -tAc "$SQL_QUERY"
+  ' 2>/dev/null || true)"
+
+  echo "${value}" | tr -d '[:space:]'
+}
+
+postgres_mlflow_runs_count() {
+  local count
+  count="$(postgres_query_scalar mlflow 'SELECT COUNT(*) FROM runs;')"
+  if ! [[ "${count}" =~ ^[0-9]+$ ]]; then
+    count=0
+  fi
+  echo "${count}"
+}
+
+restore_postgres_mlflow_snapshot_if_needed() {
+  local current_runs current_dir source_dir restored_runs
+
+  current_runs="$(postgres_mlflow_runs_count)"
+  if [ "${current_runs}" -gt 0 ]; then
+    echo "=== MLflow Postgres restore check: found ${current_runs} existing run(s); keeping current postgres-pvc ==="
+    return
+  fi
+
+  current_dir="$(current_claim_dir platform postgres-pvc)"
+  source_dir="$(find_restore_source_dir platform postgres-pvc "${current_dir}")"
+  if [ -z "${current_dir}" ] || [ -z "${source_dir}" ] || [ ! -d "${source_dir}" ]; then
+    echo "=== MLflow Postgres restore check: no previous postgres snapshot available ==="
+    return
+  fi
+
+  echo "=== Current mlflow database has 0 runs; restoring postgres-pvc from previous snapshot ==="
+  echo "Restoring platform/postgres-pvc from:"
+  echo "  ${source_dir}"
+  echo "into:"
+  echo "  ${current_dir}"
+
+  scale_resource argocd statefulset argocd-application-controller 0
+  wait_for_no_pods argocd app.kubernetes.io/name=argocd-application-controller 180 || true
+  scale_resource platform deployment mlflow 0
+  scale_resource platform statefulset postgres 0
+  wait_for_no_pods platform app=mlflow 180 || true
+  wait_for_no_pods platform app=postgres 180 || true
+
+  sudo rsync -aHAX --delete "${source_dir}/" "${current_dir}/"
+
+  scale_resource platform statefulset postgres 1
+  wait_for_rollout platform statefulset postgres 600
+  bootstrap_postgres
+  scale_resource platform deployment mlflow 1
+  scale_resource argocd statefulset argocd-application-controller 1
+  wait_for_rollout argocd statefulset argocd-application-controller 300
+
+  restored_runs="$(postgres_mlflow_runs_count)"
+  if [ "${restored_runs}" -gt 0 ]; then
+    echo "=== MLflow Postgres restore check: recovered ${restored_runs} run(s) from persistent storage ==="
+  else
+    echo "=== MLflow Postgres restore check: previous snapshot still has 0 runs ==="
+  fi
+}
+
 initialize_minio_buckets() {
   echo "=== Initializing MinIO buckets ==="
   local job_name="minio-init-$(date +%s)"
@@ -941,6 +1009,7 @@ restore_previous_persistent_state
 wait_for_rollout platform statefulset postgres 600
 wait_for_rollout platform deployment minio 600
 bootstrap_postgres
+restore_postgres_mlflow_snapshot_if_needed
 initialize_minio_buckets
 seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
