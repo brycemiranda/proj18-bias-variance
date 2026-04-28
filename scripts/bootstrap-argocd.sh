@@ -234,7 +234,7 @@ build_and_import "proj18biasvariance/mealie-als-training:local" "training/Docker
 build_and_import "proj18biasvariance/mealie-nightly-eval:local" "data/nightly_eval/Dockerfile" "data/nightly_eval"
 
 echo "=== Installing ArgoCD ==="
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 wait_for_rollout argocd deployment argocd-server 600
 wait_for_rollout argocd deployment argocd-repo-server 600
 wait_for_rollout argocd statefulset argocd-application-controller 600
