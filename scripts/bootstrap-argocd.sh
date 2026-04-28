@@ -70,13 +70,9 @@ build_and_import() {
 }
 
 ensure_mealie_source() {
-  if [ -f "mealie_proj18/docker/Dockerfile" ]; then
-    return
-  fi
-
   if [ -f ".gitmodules" ]; then
     require_cmd git
-    echo "=== Initializing mealie_proj18 submodule ==="
+    echo "=== Syncing mealie_proj18 submodule ==="
     git submodule update --init --recursive mealie_proj18
   fi
 

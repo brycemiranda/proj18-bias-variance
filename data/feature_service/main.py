@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import time
 import logging
 from io import BytesIO
 from typing import List, Optional
@@ -76,6 +77,8 @@ _recipe_vectors: Optional[np.ndarray] = None       # (N, 50) pre-computed embedd
 _recipe_vectors_norm: Optional[np.ndarray] = None  # (N, 50) L2-normalized for cosine sim
 _recipe_ids: Optional[List[str]] = None            # aligned with _recipe_vectors rows
 _tag_to_vec: Optional[dict] = None                 # tag → np.array(50,)
+_last_reload_attempt: float = 0.0
+RELOAD_INTERVAL_SECONDS = int(os.environ.get("DISCOVERY_RELOAD_INTERVAL_SECONDS", "30"))
 
 
 def s3():
@@ -182,9 +185,26 @@ def load_discovery_corpus():
         _recipe_ids     = []
 
 
+def ensure_discovery_corpus_loaded(force: bool = False):
+    """Retry loading when MinIO data becomes available after the pod has started."""
+    global _last_reload_attempt
+
+    need_tags = not _tag_to_vec
+    need_corpus = _recipe_ids is None or len(_recipe_ids) == 0
+    if not force and not (need_tags or need_corpus):
+        return
+
+    now = time.monotonic()
+    if not force and (now - _last_reload_attempt) < RELOAD_INTERVAL_SECONDS:
+        return
+
+    _last_reload_attempt = now
+    load_discovery_corpus()
+
+
 @app.on_event("startup")
 def startup():
-    load_discovery_corpus()
+    ensure_discovery_corpus_loaded(force=True)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -233,6 +253,7 @@ class TagVectorRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
+    ensure_discovery_corpus_loaded()
     return {
         "status": "ok",
         "discovery_recipes": len(_recipe_ids) if _recipe_ids else 0,
@@ -287,6 +308,7 @@ def discovery(
     Ranking: cosine similarity of user taste vector × pre-computed recipe embeddings.
     Cold-start (no vector): filter by category only, return in stable order.
     """
+    ensure_discovery_corpus_loaded()
     if _discovery_df is None or len(_recipe_ids) == 0:
         return {"items": [], "page": page, "total": 0, "cold_start": True}
 
@@ -380,6 +402,7 @@ def discovery(
 @app.post("/tag-vector")
 def tag_vector(req: TagVectorRequest):
     """Return mean tag vector for a list of tags. Used by mealie for preference initialization."""
+    ensure_discovery_corpus_loaded()
     if not _tag_to_vec:
         return {"vector": None}
     vecs = [_tag_to_vec[t] for t in req.tags if t in _tag_to_vec]
