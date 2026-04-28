@@ -292,8 +292,10 @@ def discovery(
 
     # Build mask without copying the full 150k-row DataFrame
     mask = None
+    cat_list: list[str] = []
     if category and category in CATEGORIES:
         mask = (_discovery_df['category'] == category).values
+        cat_list = [category]
     elif categories:
         cat_list = [c.strip() for c in categories.split(',') if c.strip() in CATEGORIES]
         if cat_list:
@@ -309,27 +311,37 @@ def discovery(
     user_vec = get_user_vector(user_id)
     cold_start = user_vec is None
 
-    if cold_start or all(v == 0.0 for v in user_vec):
-        order = None
-        page_scores = None
-    else:
-        uv = np.array(user_vec, dtype=np.float32)
-        uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
-        scores = norm_vectors @ uv_norm                # cosine similarity in [-1, 1]
-        scores = np.clip(scores, 0.0, 1.0)            # clip negatives to 0 for display
-        order = np.argsort(-scores)                    # descending
-        page_scores = scores[order]
-
     total = len(df)
     start = (page - 1) * page_size
     end   = start + page_size
 
-    if order is not None:
-        page_df     = df.iloc[order[start:end]]
-        score_slice = page_scores[start:end]
-    else:
-        page_df     = df.iloc[start:end]
+    if cold_start or all(v == 0.0 for v in user_vec):
+        if len(cat_list) > 1:
+            # Interleave categories so each appears proportionally on every page.
+            # Round-robin: Indian[0], Vegetarian[0], Indian[1], Vegetarian[1], ...
+            cat_indices: list[list[int]] = []
+            for cat in cat_list:
+                idx = list(np.where((df['category'] == cat).values)[0])
+                cat_indices.append(idx)
+            interleaved: list[int] = []
+            max_len = max(len(g) for g in cat_indices)
+            for i in range(max_len):
+                for grp in cat_indices:
+                    if i < len(grp):
+                        interleaved.append(grp[i])
+            idx_order = np.array(interleaved, dtype=np.intp)
+        else:
+            idx_order = np.arange(total, dtype=np.intp)
+        page_df     = df.iloc[idx_order[start:end]]
         score_slice = None
+    else:
+        uv = np.array(user_vec, dtype=np.float32)
+        uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
+        scores = norm_vectors @ uv_norm
+        scores = np.clip(scores, 0.0, 1.0)
+        idx_order = np.argsort(-scores)
+        page_df     = df.iloc[idx_order[start:end]]
+        score_slice = scores[idx_order[start:end]]
 
     items = []
     for i, (_, row) in enumerate(page_df.iterrows()):
@@ -345,6 +357,7 @@ def discovery(
         })
 
     return {"items": items, "page": page, "total": total, "cold_start": cold_start}
+
 
 
 @app.post("/tag-vector")
