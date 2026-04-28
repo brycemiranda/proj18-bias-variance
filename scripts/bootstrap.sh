@@ -112,8 +112,8 @@ ensure_mealie_source() {
     git submodule update --init --recursive mealie_proj18
   fi
 
-  if [ ! -f "mealie_proj18/docker/Dockerfile" ]; then
-    echo "Error: mealie_proj18/docker/Dockerfile not found."
+  if [ ! -f "mealie_proj18/mealie/routes/recommendations.py" ]; then
+    echo "Error: mealie_proj18 sources not found."
     exit 1
   fi
 }
