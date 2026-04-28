@@ -416,7 +416,7 @@ ensure_mealie_source
 
 echo "=== Building local application images ==="
 build_and_import "proj18biasvariance/mealie-serving:local" "serving/Dockerfile" "."
-build_and_import "proj18biasvariance/mealie-custom:local" "mealie_proj18/docker/Dockerfile" "mealie_proj18"
+build_and_import "proj18biasvariance/mealie-custom:local" "mealie-patch/Dockerfile.mealie_proj18" "mealie_proj18"
 build_and_import "proj18biasvariance/mealie-feature-service:local" "data/feature_service/Dockerfile" "data/feature_service"
 build_and_import "proj18biasvariance/batch-compile-datasets:local" "data/batch/Dockerfile" "data/batch"
 build_and_import "proj18biasvariance/mealie-als-training:local" "training/Dockerfile" "training"
