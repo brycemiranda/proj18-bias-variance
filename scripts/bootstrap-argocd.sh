@@ -194,6 +194,41 @@ wait_for_rollout() {
   kubectl rollout status "${kind}/${name}" -n "${namespace}" --timeout="${timeout}s"
 }
 
+wait_for_job() {
+  local namespace="$1"
+  local job_name="$2"
+  local timeout="${3:-300s}"
+  kubectl wait --for=condition=complete "job/${job_name}" -n "${namespace}" --timeout="${timeout}"
+}
+
+recreate_job_from_manifest() {
+  local manifest_path="$1"
+  local namespace="$2"
+  local job_name="$3"
+  kubectl delete job "${job_name}" -n "${namespace}" --ignore-not-found=true
+  kubectl apply -f "${manifest_path}"
+}
+
+bootstrap_postgres() {
+  echo "=== Bootstrapping PostgreSQL databases and schema ==="
+  kubectl exec -n platform postgres-0 -- sh -lc '
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '\''mlflow'\''" | grep -q 1 \
+      || psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE mlflow"
+  '
+
+  kubectl exec -i -n platform postgres-0 -- sh -lc '
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    psql -U "$POSTGRES_USER" -d mealie
+  ' < data/init.sql
+}
+
+initialize_minio_buckets() {
+  echo "=== Initializing MinIO buckets ==="
+  recreate_job_from_manifest k8s/platform/minio-init-job.yaml platform minio-init
+  wait_for_job platform minio-init 240s
+}
+
 open_firewall_ports() {
   echo "=== Opening common NodePort firewall ports ==="
   for port in 22 30090 30443 30500 30800 30900 30901 30091 30300 30903; do
@@ -422,6 +457,8 @@ EOF
 echo "=== Waiting for Argo-managed workloads ==="
 wait_for_rollout platform statefulset postgres 600
 wait_for_rollout platform deployment minio 600
+bootstrap_postgres
+initialize_minio_buckets
 wait_for_rollout platform deployment mlflow 600
 wait_for_rollout serving deployment inference-api 600
 wait_for_rollout data deployment feature-service 600
