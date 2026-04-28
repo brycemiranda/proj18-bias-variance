@@ -303,6 +303,13 @@ EOF
   kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
 }
 
+restart_local_image_workloads() {
+  echo "=== Restarting local-image workloads ==="
+  kubectl rollout restart deployment/inference-api -n serving || true
+  kubectl rollout restart deployment/feature-service -n data || true
+  kubectl rollout restart deployment/mealie-app -n mealie || true
+}
+
 cleanup_recovery_mode_jobs() {
   echo "=== Cleaning recovery-mode background jobs ==="
   kubectl delete cronjob batch-compile-datasets -n data --ignore-not-found=true >/dev/null 2>&1 || true
@@ -536,6 +543,7 @@ wait_for_rollout platform deployment minio 600
 bootstrap_postgres
 initialize_minio_buckets
 cleanup_recovery_mode_jobs
+restart_local_image_workloads
 wait_for_rollout platform deployment mlflow 600
 wait_for_rollout serving deployment inference-api 600
 wait_for_rollout data deployment feature-service 600

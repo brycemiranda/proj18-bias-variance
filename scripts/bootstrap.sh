@@ -274,6 +274,14 @@ EOF
   kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
 }
 
+restart_local_image_workloads() {
+  echo "=== Restarting local-image workloads ==="
+  kubectl rollout restart deployment/inference-api -n serving || true
+  kubectl rollout restart deployment/inference-api-canary -n serving || true
+  kubectl rollout restart deployment/feature-service -n data || true
+  kubectl rollout restart deployment/mealie-app -n mealie || true
+}
+
 seed_production_model() {
   echo "=== Promoting staging tag vectors to canary and production ==="
   kubectl delete job seed-production-model -n training --ignore-not-found=true
@@ -447,6 +455,8 @@ kubectl apply -f k8s/training/monthly-retrain-cronjob.yaml
 kubectl apply -f k8s/training/nightly_eval.yaml
 kubectl apply -f k8s/training/model-promoter-cronjob.yaml
 kubectl apply -f k8s/mealie/mealie-deployment.yaml
+
+restart_local_image_workloads
 
 kubectl rollout status deployment/inference-api -n serving --timeout=300s
 kubectl rollout status deployment/inference-api-canary -n serving --timeout=300s || true
