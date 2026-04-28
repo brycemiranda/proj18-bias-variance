@@ -292,8 +292,10 @@ def discovery(
 
     # Build mask without copying the full 150k-row DataFrame
     mask = None
+    cat_list: list[str] = []
     if category and category in CATEGORIES:
         mask = (_discovery_df['category'] == category).values
+        cat_list = [category]
     elif categories:
         cat_list = [c.strip() for c in categories.split(',') if c.strip() in CATEGORIES]
         if cat_list:
@@ -309,27 +311,53 @@ def discovery(
     user_vec = get_user_vector(user_id)
     cold_start = user_vec is None
 
-    if cold_start or all(v == 0.0 for v in user_vec):
-        order = None
-        page_scores = None
-    else:
-        uv = np.array(user_vec, dtype=np.float32)
-        uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
-        scores = norm_vectors @ uv_norm                # cosine similarity in [-1, 1]
-        scores = np.clip(scores, 0.0, 1.0)            # clip negatives to 0 for display
-        order = np.argsort(-scores)                    # descending
-        page_scores = scores[order]
-
-    total = len(df)
     start = (page - 1) * page_size
     end   = start + page_size
 
-    if order is not None:
-        page_df     = df.iloc[order[start:end]]
-        score_slice = page_scores[start:end]
+    # Compute normalized user vector once (None when cold-start)
+    uv_norm: Optional[np.ndarray] = None
+    if not cold_start and user_vec and not all(v == 0.0 for v in user_vec):
+        uv = np.array(user_vec, dtype=np.float32)
+        uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
+
+    if len(cat_list) > 1:
+        # Multiple genres selected: score each independently, then round-robin interleave.
+        # This guarantees every genre appears proportionally on every page regardless of
+        # how the model scores them relative to each other.
+        interleaved_pos: list[int]   = []
+        interleaved_sc:  list[float] = []
+
+        cat_sorted: list[tuple[np.ndarray, Optional[np.ndarray]]] = []
+        for cat in cat_list:
+            cat_pos = np.where((df['category'] == cat).values)[0]
+            if uv_norm is not None:
+                cat_sc = np.clip(norm_vectors[cat_pos] @ uv_norm, 0.0, 1.0)
+                order  = np.argsort(-cat_sc)
+                cat_sorted.append((cat_pos[order], cat_sc[order]))
+            else:
+                cat_sorted.append((cat_pos, None))
+
+        max_len = max(len(p) for p, _ in cat_sorted)
+        for i in range(max_len):
+            for pos_arr, sc_arr in cat_sorted:
+                if i < len(pos_arr):
+                    interleaved_pos.append(int(pos_arr[i]))
+                    interleaved_sc.append(float(sc_arr[i]) if sc_arr is not None else 0.0)
+
+        total    = len(interleaved_pos)
+        page_df  = df.iloc[interleaved_pos[start:end]]
+        score_slice = interleaved_sc[start:end]
     else:
-        page_df     = df.iloc[start:end]
-        score_slice = None
+        # Single category or no filter: rank all by score (or file order if cold-start)
+        total = len(df)
+        if uv_norm is not None:
+            scores  = np.clip(norm_vectors @ uv_norm, 0.0, 1.0)
+            idx_ord = np.argsort(-scores)
+            page_df     = df.iloc[idx_ord[start:end]]
+            score_slice = scores[idx_ord[start:end]].tolist()
+        else:
+            page_df     = df.iloc[start:end]
+            score_slice = None
 
     items = []
     for i, (_, row) in enumerate(page_df.iterrows()):
@@ -344,7 +372,9 @@ def discovery(
             "score":       float(score_slice[i]) if score_slice is not None else 0.0,
         })
 
+
     return {"items": items, "page": page, "total": total, "cold_start": cold_start}
+
 
 
 @app.post("/tag-vector")
