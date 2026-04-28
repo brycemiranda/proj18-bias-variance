@@ -12,7 +12,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: batch-compile-datasets
-              image: mahimamariah/batch-compile-datasets:latest
+              image: bm3986/batch-compile-datasets:latest
               env:
                 - name: BUCKET_NAME
                   value: training-data

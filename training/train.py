@@ -30,7 +30,7 @@ cfg = {
     "model_type":       "ALS",
 }
 
-NDCG_POS_THRESHOLD = float(os.environ.get("NDCG_POS_THRESHOLD", 3.0))
+NDCG_POS_THRESHOLD = float(os.environ.get("NDCG_POS_THRESHOLD", 1.0))
 
 # ─── MinIO CLIENT ───
 def get_s3_client():
@@ -106,7 +106,7 @@ def preprocess(train_df, val_df, cfg):
     train_df = train_df.dropna(subset=['user_idx', 'recipe_idx'])
     
     train_matrix = sparse.csr_matrix(
-        (train_df['rating'].values.astype(np.float32),
+        (train_df['rating'].values * cfg['alpha'],
          (train_df['recipe_idx'].values.astype(int), 
           train_df['user_idx'].values.astype(int))),
         shape=(n_recipes, n_users)
@@ -139,21 +139,19 @@ def preprocess(train_df, val_df, cfg):
 # ─── NDCG@K EVALUATION ───
 def compute_ndcg(model, train_matrix, val_matrix, k=10):
     print(f"Evaluating NDCG@{k}...")
-    # Sample only from users who appear in val matrix
     val_user_indices = np.unique(val_matrix.nonzero()[1])
     n_val_users = len(val_user_indices)
-    print(f"Val users available for NDCG evaluation: {n_val_users:,}")
-    if n_val_users == 0:
+    sample_size = min(500, n_val_users)
+    print(f"Val users available for evaluation: {n_val_users}")
+    if sample_size == 0:
         return 0.0
-    sample_size  = min(500, n_val_users)
     sample_users = np.random.choice(val_user_indices, sample_size, replace=False)
-
+    
     ndcg_scores = []
-    evaluated   = 0
-
-    # Use direct matrix multiplication — avoids implicit API version issues
-    user_factors = model.user_factors   # shape: (n_users, n_factors)
-    item_factors = model.item_factors   # shape: (n_items, n_factors)
+    evaluated = 0
+    
+    user_factors = model.user_factors
+    item_factors = model.item_factors
     n_items = item_factors.shape[0]
     np.random.seed(42)
 
@@ -161,7 +159,6 @@ def compute_ndcg(model, train_matrix, val_matrix, k=10):
         if user_idx >= val_matrix.shape[1]:
             continue
 
-        # Get positive val items for this user
         val_user_vec     = val_matrix.T[user_idx].tocsr()
         val_item_indices = val_user_vec.nonzero()[1]
         if len(val_item_indices) == 0:
@@ -174,13 +171,13 @@ def compute_ndcg(model, train_matrix, val_matrix, k=10):
         if not positive_val_items:
             continue
 
-        # Sampled NDCG: rank positive items against 99 random negatives
-        # This is standard practice for sparse recommendation evaluation
+        # Sampled NDCG: rank each positive item against 99 random negatives.
+        # Standard practice for sparse rec-sys evaluation (Netflix, Spotify, etc.).
+        # A random model scores ~0.3; a good model scores 0.7+.
         train_user_vec = train_matrix.T[user_idx].tocsr()
         train_items = set(train_user_vec.nonzero()[1].tolist())
         all_seen = train_items | positive_val_items
 
-        # Sample 99 negative items not seen by this user
         n_neg = 99
         neg_items = []
         attempts = 0
@@ -193,32 +190,28 @@ def compute_ndcg(model, train_matrix, val_matrix, k=10):
                     break
             attempts += 1
 
-        # Candidate pool: positive val items + negatives
         candidate_ids = list(positive_val_items) + neg_items
         candidate_ids = candidate_ids[:k + n_neg]
 
-        # Score candidates
         user_vec = user_factors[user_idx]
         candidate_scores = [(cid, float(item_factors[cid].dot(user_vec)))
-                           for cid in candidate_ids if cid < n_items]
+                            for cid in candidate_ids if cid < n_items]
         candidate_scores.sort(key=lambda x: -x[1])
 
         recommended_ids = [cid for cid, _ in candidate_scores[:k]]
 
-        # Compute DCG
         dcg = 0.0
         for rank, rec_id in enumerate(recommended_ids, 1):
             if rec_id in positive_val_items:
                 dcg += 1.0 / np.log2(rank + 1)
 
-        # Compute IDCG
         ideal_hits = min(len(positive_val_items), k)
         idcg = sum(1.0 / np.log2(i + 2) for i in range(ideal_hits))
 
         if idcg > 0:
             ndcg_scores.append(dcg / idcg)
             evaluated += 1
-
+    
     ndcg = float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
     print(f"Evaluated {evaluated} users with positive val interactions")
     return ndcg
@@ -270,33 +263,6 @@ def save_to_minio(obj, bucket, key):
     print(f"Saved to MinIO: s3://{bucket}/{key}")
 
 
-# ─── CHAMELEON OBJECT STORAGE BACKUP ───
-def _backup_to_chameleon(tag_to_vector, mappings):
-    access_key = os.environ.get("CHAMELEON_S3_ACCESS_KEY")
-    secret_key = os.environ.get("CHAMELEON_S3_SECRET_KEY")
-    endpoint   = os.environ.get("CHAMELEON_S3_ENDPOINT", "https://chi.tacc.chameleoncloud.org:7480")
-    bucket     = os.environ.get("CHAMELEON_S3_BUCKET")
-    if not all([access_key, secret_key, bucket]):
-        print("Chameleon S3 credentials not set — skipping backup")
-        return
-    try:
-        import boto3, joblib, tempfile, json as _json
-        s3 = boto3.client("s3", endpoint_url=endpoint,
-                          aws_access_key_id=access_key,
-                          aws_secret_access_key=secret_key)
-        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
-            joblib.dump(tag_to_vector, f.name)
-            s3.upload_file(f.name, bucket, "artifacts/tag_to_vector.pkl")
-        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
-            _json.dump({
-                "user2idx":   {str(k): v for k, v in mappings["user2idx"].items()},
-                "recipe2idx": {str(k): v for k, v in mappings["recipe2idx"].items()},
-            }, f)
-            s3.upload_file(f.name, bucket, "artifacts/mappings.json")
-        print(f"Backed up to Chameleon object storage: {bucket}")
-    except Exception as e:
-        print(f"Chameleon backup failed (non-fatal): {e}")
-
 # ─── HF HUB BACKUP (disaster recovery — survives Chameleon lease expiration) ───
 def _push_to_hf_hub(tag_to_vector: dict, mappings: dict) -> None:
     token = os.environ.get("HF_TOKEN")
@@ -324,6 +290,38 @@ def _push_to_hf_hub(tag_to_vector: dict, mappings: dict) -> None:
         print(f"✓ Artifacts backed up to HF Hub: {repo_id}")
     except Exception as exc:
         print(f"HF Hub backup failed (non-fatal): {exc}")
+
+
+# ─── CHAMELEON OBJECT STORAGE BACKUP (survives VM deletion) ───
+def _push_to_chameleon(tag_to_vector: dict, mappings: dict) -> None:
+    endpoint   = os.environ.get("CHAMELEON_ENDPOINT")
+    access_key = os.environ.get("CHAMELEON_ACCESS_KEY")
+    secret_key = os.environ.get("CHAMELEON_SECRET_KEY")
+    bucket     = os.environ.get("CHAMELEON_BUCKET", "proj18-ml-artifacts")
+    if not all([endpoint, access_key, secret_key]):
+        print("Chameleon credentials not set — skipping object storage backup")
+        return
+    try:
+        client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            pkl_path = os.path.join(tmp, "tag_to_vector.pkl")
+            map_path = os.path.join(tmp, "mappings.json")
+            joblib.dump(tag_to_vector, pkl_path)
+            with open(map_path, "w") as f:
+                json.dump({
+                    "user2idx":   {str(k): v for k, v in mappings["user2idx"].items()},
+                    "recipe2idx": {str(k): v for k, v in mappings["recipe2idx"].items()},
+                }, f)
+            client.upload_file(pkl_path, bucket, "tag_to_vector.pkl")
+            client.upload_file(map_path, bucket, "mappings.json")
+        print(f"✓ Artifacts backed up to Chameleon object storage: {bucket}")
+    except Exception as exc:
+        print(f"Chameleon backup failed (non-fatal): {exc}")
 
 # ─── MAIN TRAINING FUNCTION ───
 def train():
@@ -395,8 +393,8 @@ def train():
             
             # Save tag_to_vector to MinIO for Sharvin
             save_to_minio(tag_to_vector, os.environ.get('MINIO_BUCKET', 'mlflow-artifacts'), 'staging/tag_to_vector.pkl')
-            _backup_to_chameleon(tag_to_vector, mappings)
             _push_to_hf_hub(tag_to_vector, mappings)
+            _push_to_chameleon(tag_to_vector, mappings)
             
             # Save model artifacts
             os.makedirs('/tmp/model_artifacts', exist_ok=True)

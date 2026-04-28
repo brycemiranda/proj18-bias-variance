@@ -73,6 +73,7 @@ INGREDIENT_HINTS = {
 # ── In-memory discovery corpus ────────────────────────────────────────────────
 _discovery_df: Optional[pd.DataFrame] = None      # full recipe metadata
 _recipe_vectors: Optional[np.ndarray] = None       # (N, 50) pre-computed embeddings
+_recipe_vectors_norm: Optional[np.ndarray] = None  # (N, 50) L2-normalized for cosine sim
 _recipe_ids: Optional[List[str]] = None            # aligned with _recipe_vectors rows
 _tag_to_vec: Optional[dict] = None                 # tag → np.array(50,)
 
@@ -84,6 +85,33 @@ def s3():
         aws_access_key_id=MINIO_ACCESS,
         aws_secret_access_key=MINIO_SECRET,
     )
+
+
+def _restore_from_chameleon() -> dict:
+    endpoint   = os.environ.get("CHAMELEON_ENDPOINT")
+    access_key = os.environ.get("CHAMELEON_ACCESS_KEY")
+    secret_key = os.environ.get("CHAMELEON_SECRET_KEY")
+    bucket     = os.environ.get("CHAMELEON_BUCKET", "proj18-ml-artifacts")
+    if not all([endpoint, access_key, secret_key]):
+        log.warning("Chameleon credentials not set — skipping object storage restore")
+        return {}
+    try:
+        client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+        obj = client.get_object(Bucket=bucket, Key="tag_to_vector.pkl")
+        vec = joblib.load(BytesIO(obj['Body'].read()))
+        buf = BytesIO()
+        joblib.dump(vec, buf); buf.seek(0)
+        s3().put_object(Bucket=MINIO_BUCKET, Key="production/tag_to_vector.pkl", Body=buf.read())
+        log.info("✓ Restored tag_to_vector.pkl from Chameleon object storage → seeded MinIO production/")
+        return vec
+    except Exception as exc:
+        log.warning("Chameleon restore failed: %s", exc)
+        return {}
 
 
 def _restore_from_hf_hub() -> dict:
@@ -115,7 +143,7 @@ def _recipe_embedding(tags: list, tag_to_vec: dict) -> np.ndarray:
 
 
 def load_discovery_corpus():
-    global _discovery_df, _recipe_vectors, _recipe_ids, _tag_to_vec
+    global _discovery_df, _recipe_vectors, _recipe_vectors_norm, _recipe_ids, _tag_to_vec
 
     log.info("Loading tag_to_vector.pkl from MinIO...")
     try:
@@ -123,19 +151,20 @@ def load_discovery_corpus():
         _tag_to_vec = joblib.load(BytesIO(obj['Body'].read()))
         log.info(f"  ✓ {len(_tag_to_vec)} tags loaded")
     except Exception as e:
-        log.warning(f"tag_to_vector.pkl not in MinIO ({e}) — trying HF Hub restore...")
-        _tag_to_vec = _restore_from_hf_hub()
+        log.warning(f"tag_to_vector.pkl not in MinIO ({e}) — trying Chameleon object storage...")
+        _tag_to_vec = _restore_from_chameleon()
+        if not _tag_to_vec:
+            log.warning("Chameleon restore empty — trying HF Hub restore...")
+            _tag_to_vec = _restore_from_hf_hub()
 
     log.info("Loading discovery_recipes.parquet from MinIO...")
     try:
         obj = s3().get_object(Bucket=DATA_BUCKET, Key='processed/discovery_recipes.parquet')
         _discovery_df = pd.read_parquet(BytesIO(obj['Body'].read()))
-        _discovery_df['tags']        = _discovery_df['tags'].apply(
-            lambda t: t if isinstance(t, list) else [])
-        _discovery_df['ingredients'] = _discovery_df['ingredients'].apply(
-            lambda t: t if isinstance(t, list) else [])
-        _discovery_df['steps']       = _discovery_df['steps'].apply(
-            lambda t: t if isinstance(t, list) else [])
+        _to_list = lambda t: list(t) if hasattr(t, '__iter__') and not isinstance(t, (str, float, type(None))) else []
+        _discovery_df['tags']        = _discovery_df['tags'].apply(_to_list)
+        _discovery_df['ingredients'] = _discovery_df['ingredients'].apply(_to_list)
+        _discovery_df['steps']       = _discovery_df['steps'].apply(_to_list)
         _discovery_df['description'] = _discovery_df['description'].fillna('')
 
         _recipe_ids = _discovery_df['recipe_id'].tolist()
@@ -143,6 +172,8 @@ def load_discovery_corpus():
         vecs = [_recipe_embedding(tags, _tag_to_vec)
                 for tags in _discovery_df['tags']]
         _recipe_vectors = np.stack(vecs).astype(np.float32)  # (N, 50)
+        norms = np.linalg.norm(_recipe_vectors, axis=1, keepdims=True)
+        _recipe_vectors_norm = _recipe_vectors / np.where(norms > 0, norms, 1.0)
         log.info(f"  ✓ Discovery corpus ready: {len(_recipe_ids):,} recipes")
     except Exception as e:
         log.warning(f"discovery_recipes.parquet not found ({e}) — discovery feed disabled")
@@ -166,10 +197,10 @@ def get_user_vector(user_id: str) -> Optional[list]:
     try:
         conn = pg()
         cur  = conn.cursor()
-        cur.execute("SELECT vector FROM user_vectors WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT taste_vector FROM user_ml_preferences WHERE user_id = %s::uuid", (user_id,))
         row = cur.fetchone()
         cur.close(); conn.close()
-        if row:
+        if row and row[0]:
             return row[0] if isinstance(row[0], list) else json.loads(row[0])
     except Exception as e:
         log.warning(f"Failed to fetch user vector for {user_id}: {e}")
@@ -193,6 +224,10 @@ class EventRequest(BaseModel):
 
 class AutoTagRequest(BaseModel):
     ingredients: List[str]
+
+
+class TagVectorRequest(BaseModel):
+    tags: List[str]
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -245,6 +280,7 @@ def discovery(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
     category: Optional[str] = Query(None),
+    categories: Optional[str] = Query(None),  # comma-separated preferred genres
 ):
     """
     Return ranked Food.com recipes for the discovery feed.
@@ -255,13 +291,19 @@ def discovery(
         return {"items": [], "page": page, "total": 0, "cold_start": True}
 
     df = _discovery_df.copy()
-    vectors = _recipe_vectors
+    norm_vectors = _recipe_vectors_norm
 
-    # Category filter
+    # Category filter — single category takes precedence, then multi-category from onboarding
     if category and category in CATEGORIES:
         mask = df['category'] == category
-        df      = df[mask].reset_index(drop=True)
-        vectors = _recipe_vectors[mask.values]
+        df           = df[mask].reset_index(drop=True)
+        norm_vectors = _recipe_vectors_norm[mask.values]
+    elif categories:
+        cat_list = [c.strip() for c in categories.split(',') if c.strip() in CATEGORIES]
+        if cat_list:
+            mask = df['category'].isin(cat_list)
+            df           = df[mask].reset_index(drop=True)
+            norm_vectors = _recipe_vectors_norm[mask.values]
 
     user_vec = get_user_vector(user_id)
     cold_start = user_vec is None
@@ -271,7 +313,9 @@ def discovery(
         ranked_df = df
     else:
         uv = np.array(user_vec, dtype=np.float32)
-        scores = vectors @ uv                          # (N,) dot products
+        uv_norm = uv / max(float(np.linalg.norm(uv)), 1e-9)
+        scores = norm_vectors @ uv_norm                # cosine similarity in [-1, 1]
+        scores = np.clip(scores, 0.0, 1.0)            # clip negatives to 0 for display
         order  = np.argsort(-scores)                   # descending
         ranked_df = df.iloc[order].reset_index(drop=True)
         ranked_df['_score'] = scores[order]
@@ -295,6 +339,18 @@ def discovery(
         })
 
     return {"items": items, "page": page, "total": total, "cold_start": cold_start}
+
+
+@app.post("/tag-vector")
+def tag_vector(req: TagVectorRequest):
+    """Return mean tag vector for a list of tags. Used by mealie for preference initialization."""
+    if not _tag_to_vec:
+        return {"vector": None}
+    vecs = [_tag_to_vec[t] for t in req.tags if t in _tag_to_vec]
+    if not vecs:
+        return {"vector": None}
+    mean_vec = np.mean(vecs, axis=0).astype(np.float32)
+    return {"vector": mean_vec.tolist()}
 
 
 @app.post("/auto-tag")
