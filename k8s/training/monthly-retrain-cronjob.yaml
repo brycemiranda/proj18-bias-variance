@@ -22,18 +22,38 @@ spec:
               env:
                 - name: MLFLOW_TRACKING_URI
                   value: http://mlflow-service.platform.svc.cluster.local:5000
-                - name: AWS_ACCESS_KEY_ID
+                - name: MLFLOW_S3_ENDPOINT_URL
+                  value: http://minio-service.platform.svc.cluster.local:9000
+                - name: MINIO_ENDPOINT
+                  value: http://minio-service.platform.svc.cluster.local:9000
+                - name: MINIO_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:
                       name: minio-secret
                       key: accesskey
-                - name: AWS_SECRET_ACCESS_KEY
+                - name: MINIO_SECRET_KEY
                   valueFrom:
                     secretKeyRef:
                       name: minio-secret
                       key: secretkey
-                - name: MLFLOW_S3_ENDPOINT_URL
-                  value: http://minio-service.platform.svc.cluster.local:9000
+                - name: MINIO_BUCKET
+                  value: mlflow-artifacts
+                - name: POSTGRES_HOST
+                  value: postgres.platform.svc.cluster.local
+                - name: POSTGRES_DB
+                  value: mealie
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-secret
+                      key: username
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-secret
+                      key: password
+                - name: NDCG_THRESHOLD
+                  value: "0.0001"
               resources:
                 requests:
                   cpu: "100m"

@@ -119,8 +119,8 @@ def clean_interactions():
     df = df.dropna()
     df['weight']    = df['rating'].map(WEIGHT_MAP)
     df              = df[df['weight'] != 0.0]
-    df['recipe_id'] = df['recipe_id'].astype(str)
-    df['user_id']   = df['user_id'].astype(str)
+    df['recipe_id'] = df['recipe_id'].astype(int).astype(str)
+    df['user_id']   = df['user_id'].astype(int).astype(str)
     df              = df.sort_values('date')
     print(f"  ✓ {len(df):,} interactions")
     return df

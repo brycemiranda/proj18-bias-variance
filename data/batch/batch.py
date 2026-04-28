@@ -26,16 +26,20 @@ def pg():
 
 def fetch_production_events():
     print("Fetching production events from PostgreSQL...")
-    conn = pg()
-    df = pd.read_sql("""
-        SELECT user_id, recipe_id, event_type, rating, weight, timestamp
-        FROM mealie_events
-        WHERE weight != 0.0
-        ORDER BY timestamp ASC
-    """, conn)
-    conn.close()
-    print(f"  ✓ {len(df):,} events fetched")
-    return df
+    try:
+        conn = pg()
+        df = pd.read_sql("""
+            SELECT user_id, recipe_id, event_type, rating, weight, timestamp
+            FROM mealie_events
+            WHERE weight != 0.0
+            ORDER BY timestamp ASC
+        """, conn)
+        conn.close()
+        print(f"  ✓ {len(df):,} events fetched")
+        return df
+    except Exception as e:
+        print(f"  [WARN] Could not fetch production events ({e}) — using empty set")
+        return pd.DataFrame(columns=['user_id', 'recipe_id', 'event_type', 'rating', 'weight', 'timestamp'])
 
 def fetch_foodcom_base():
     print("Loading Food.com base interactions from object storage...")
@@ -52,10 +56,12 @@ def fetch_foodcom_base():
         obj_r = s3().get_object(Bucket=BUCKET, Key='processed/recipes_clean.parquet')
         recipes = pd.read_parquet(BytesIO(obj_r['Body'].read()),
                                   columns=['recipe_id', 'tags'])
-        recipes['recipe_id'] = recipes['recipe_id'].astype(str)
+        # Normalize both sides: "12345.0" (float→str) → "12345"
+        interactions['recipe_id'] = interactions['recipe_id'].str.replace(r'\.0$', '', regex=True)
+        recipes['recipe_id'] = recipes['recipe_id'].str.replace(r'\.0$', '', regex=True)
         interactions = interactions.merge(recipes, on='recipe_id', how='left')
         interactions['tags'] = interactions['tags'].apply(
-            lambda t: t if isinstance(t, list) else []
+            lambda t: list(t) if hasattr(t, '__iter__') and not isinstance(t, (str, float, type(None))) else []
         )
         print(f"  ✓ Tags joined ({interactions['tags'].apply(len).mean():.1f} tags/interaction avg)")
     except Exception as e:
@@ -67,6 +73,7 @@ def fetch_foodcom_base():
 
 def candidate_selection(df):
     print("Applying candidate selection...")
+    df = df[df['rating'] > 0]
     df = df[df['weight'] != 0.0]
     user_counts = df.groupby('user_id').size()
     valid = user_counts[user_counts >= 3].index

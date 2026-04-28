@@ -58,18 +58,20 @@ spec:
                   key: password
             - name: POSTGRES_DB
               value: mealie
-            - name: AWS_ACCESS_KEY_ID
+            - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: accesskey
-            - name: AWS_SECRET_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: secretkey
-            - name: S3_ENDPOINT_URL
+            - name: MINIO_ENDPOINT
               value: http://minio-service.platform.svc.cluster.local:9000
+            - name: MINIO_BUCKET
+              value: mlflow-artifacts
           resources:
             requests:
               cpu: "50m"
