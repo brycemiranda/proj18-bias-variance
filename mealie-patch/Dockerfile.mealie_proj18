@@ -1,23 +1,53 @@
+FROM node:24@sha256:e9891237dfbb1de60ce19e9ff9fac5d73ad9c37da303ad72ff2a425ad1057e71 AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend .
+
+RUN yarn install \
+    --prefer-offline \
+    --frozen-lockfile \
+    --non-interactive \
+    --production=false \
+    --network-timeout 1000000
+
+RUN yarn generate
+
 FROM ghcr.io/mealie-recipes/mealie:v2.2.0
 
-# Backend: recommendation service + routes + schema from mealie_proj18
-COPY mealie/schema/recommendations.py /app/mealie/schema/recommendations.py
-COPY mealie/routes/recommendations.py /app/mealie/routes/recommendations.py
-COPY mealie/services/recommendation_service.py /app/mealie/services/recommendation_service.py
-COPY mealie/db/models/users/user_ml_preferences.py /app/mealie/db/models/users/user_ml_preferences.py
-COPY mealie/alembic/versions/2026-04-17-05.30.00_c1f7f0d9a9a1_add_user_ml_preferences.py \
-     /app/mealie/alembic/versions/2026-04-17-05.30.00_c1f7f0d9a9a1_add_user_ml_preferences.py
+COPY mealie /tmp/mealie-src
+COPY --from=frontend-builder /frontend/dist /tmp/mealie-frontend
 
-# Frontend: recommendation UI from mealie_proj18
-COPY frontend/app/components/AppRecommendedForYou.vue \
-     /app/frontend/app/components/AppRecommendedForYou.vue
-COPY frontend/app/components/GenrePicker.vue \
-     /app/frontend/app/components/GenrePicker.vue
-COPY frontend/app/components/RecipeDetailModal.vue \
-     /app/frontend/app/components/RecipeDetailModal.vue
-COPY frontend/app/components/Domain/Recipe/RecipeExplorerPage/RecipeExplorerPage.vue \
-     /app/frontend/app/components/Domain/Recipe/RecipeExplorerPage/RecipeExplorerPage.vue
-COPY frontend/app/lib/api/types/recommendations.ts \
-     /app/frontend/app/lib/api/types/recommendations.ts
-COPY frontend/app/lib/api/user/recommendations.ts \
-     /app/frontend/app/lib/api/user/recommendations.ts
+RUN python - <<'PY'
+import importlib.util
+import pathlib
+import shutil
+
+spec = importlib.util.find_spec("mealie")
+if spec is None or spec.origin is None:
+    raise RuntimeError("Unable to locate installed mealie package in base image")
+
+package_dir = pathlib.Path(spec.origin).resolve().parent
+source_dir = pathlib.Path("/tmp/mealie-src")
+frontend_dir = pathlib.Path("/tmp/mealie-frontend")
+
+for source_path in source_dir.rglob("*"):
+    relative_path = source_path.relative_to(source_dir)
+    if relative_path.parts and relative_path.parts[0] == "frontend":
+        continue
+
+    destination_path = package_dir / relative_path
+    if source_path.is_dir():
+        destination_path.mkdir(parents=True, exist_ok=True)
+        continue
+
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, destination_path)
+
+installed_frontend_dir = package_dir / "frontend"
+if installed_frontend_dir.exists():
+    shutil.rmtree(installed_frontend_dir)
+shutil.copytree(frontend_dir, installed_frontend_dir)
+PY
+
+RUN rm -rf /tmp/mealie-src /tmp/mealie-frontend

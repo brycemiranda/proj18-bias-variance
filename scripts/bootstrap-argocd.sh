@@ -102,15 +102,15 @@ deployment_exists() {
 }
 
 capture_existing_local_workloads() {
+  deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
+
   if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
     RESTART_INFERENCE_API=0
     RESTART_FEATURE_SERVICE=0
-    RESTART_MEALIE_APP=0
     return
   fi
   deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
   deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
-  deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
 }
 
 build_and_import() {
