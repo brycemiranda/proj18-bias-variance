@@ -484,12 +484,13 @@ reconcile_postgres_role_password() {
   echo "=== Reconciling PostgreSQL role password with postgres-secret ==="
   kubectl exec -n platform postgres-0 -- sh -lc '
     export PGPASSWORD="$POSTGRES_PASSWORD"
-    psql -v ON_ERROR_STOP=1 \
-         -v dbuser="$POSTGRES_USER" \
-         -v dbpass="$POSTGRES_PASSWORD" \
-         -U "$POSTGRES_USER" \
-         -d postgres \
-         -c "ALTER ROLE :\"dbuser\" WITH PASSWORD :'dbpass';"
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres <<SQL
+SELECT format(
+  '\''ALTER ROLE %I WITH PASSWORD %L'\'',
+  '\''$POSTGRES_USER'\'',
+  '\''$POSTGRES_PASSWORD'\''
+) \gexec
+SQL
   '
 }
 
