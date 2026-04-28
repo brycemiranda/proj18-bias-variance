@@ -13,6 +13,9 @@ RESTART_LOCAL_WORKLOADS="${RESTART_LOCAL_WORKLOADS:-0}"
 RESTART_INFERENCE_API=0
 RESTART_FEATURE_SERVICE=0
 RESTART_MEALIE_APP=0
+EXISTING_INFERENCE_API=0
+EXISTING_FEATURE_SERVICE=0
+EXISTING_MEALIE_APP=0
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -102,15 +105,18 @@ deployment_exists() {
 }
 
 capture_existing_local_workloads() {
-  deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
+  deployment_exists serving inference-api && EXISTING_INFERENCE_API=1 || EXISTING_INFERENCE_API=0
+  deployment_exists data feature-service && EXISTING_FEATURE_SERVICE=1 || EXISTING_FEATURE_SERVICE=0
+  deployment_exists mealie mealie-app && EXISTING_MEALIE_APP=1 || EXISTING_MEALIE_APP=0
+  RESTART_MEALIE_APP="${EXISTING_MEALIE_APP}"
 
   if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
     RESTART_INFERENCE_API=0
     RESTART_FEATURE_SERVICE=0
     return
   fi
-  deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
-  deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
+  RESTART_INFERENCE_API="${EXISTING_INFERENCE_API}"
+  RESTART_FEATURE_SERVICE="${EXISTING_FEATURE_SERVICE}"
 }
 
 build_and_import() {
@@ -442,6 +448,7 @@ wait_for_deployment_rollout_with_cleanup() {
 
   wait_for_resource "${namespace}" deployment "${name}" "${timeout}"
   deadline=$((SECONDS + timeout))
+  echo "Waiting for deployment \"${name}\" in namespace ${namespace} to become ready..."
 
   while true; do
     remaining=$((deadline - SECONDS))
@@ -679,6 +686,17 @@ restart_local_image_workloads() {
   else
     echo "Skipping mealie-app restart on first deployment."
   fi
+}
+
+should_wait_for_local_deployment() {
+  local existed_before_apply="$1"
+  local restarted="$2"
+
+  if [ "${existed_before_apply}" = "0" ] || [ "${restarted}" = "1" ]; then
+    return 0
+  fi
+
+  return 1
 }
 
 cleanup_recovery_mode_jobs() {
@@ -923,9 +941,21 @@ seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
 restart_local_image_workloads
 wait_for_rollout platform deployment mlflow 600
-wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 600
-wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 600
-wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
+  wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 600
+else
+  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_FEATURE_SERVICE}" "${RESTART_FEATURE_SERVICE}"; then
+  wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 600
+else
+  echo "Skipping feature-service readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_MEALIE_APP}" "${RESTART_MEALIE_APP}"; then
+  wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
+else
+  echo "Skipping mealie-app readiness wait; deployment was already present and not restarted."
+fi
 wait_for_rollout monitoring deployment prometheus 600
 wait_for_rollout monitoring deployment grafana 600
 

@@ -17,6 +17,10 @@ RESTART_INFERENCE_API=0
 RESTART_INFERENCE_API_CANARY=0
 RESTART_FEATURE_SERVICE=0
 RESTART_MEALIE_APP=0
+EXISTING_INFERENCE_API=0
+EXISTING_INFERENCE_API_CANARY=0
+EXISTING_FEATURE_SERVICE=0
+EXISTING_MEALIE_APP=0
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -98,7 +102,11 @@ deployment_exists() {
 }
 
 capture_existing_local_workloads() {
-  deployment_exists mealie mealie-app && RESTART_MEALIE_APP=1 || RESTART_MEALIE_APP=0
+  deployment_exists serving inference-api && EXISTING_INFERENCE_API=1 || EXISTING_INFERENCE_API=0
+  deployment_exists serving inference-api-canary && EXISTING_INFERENCE_API_CANARY=1 || EXISTING_INFERENCE_API_CANARY=0
+  deployment_exists data feature-service && EXISTING_FEATURE_SERVICE=1 || EXISTING_FEATURE_SERVICE=0
+  deployment_exists mealie mealie-app && EXISTING_MEALIE_APP=1 || EXISTING_MEALIE_APP=0
+  RESTART_MEALIE_APP="${EXISTING_MEALIE_APP}"
 
   if ! env_flag "${RESTART_LOCAL_WORKLOADS}"; then
     RESTART_INFERENCE_API=0
@@ -106,9 +114,9 @@ capture_existing_local_workloads() {
     RESTART_FEATURE_SERVICE=0
     return
   fi
-  deployment_exists serving inference-api && RESTART_INFERENCE_API=1 || RESTART_INFERENCE_API=0
-  deployment_exists serving inference-api-canary && RESTART_INFERENCE_API_CANARY=1 || RESTART_INFERENCE_API_CANARY=0
-  deployment_exists data feature-service && RESTART_FEATURE_SERVICE=1 || RESTART_FEATURE_SERVICE=0
+  RESTART_INFERENCE_API="${EXISTING_INFERENCE_API}"
+  RESTART_INFERENCE_API_CANARY="${EXISTING_INFERENCE_API_CANARY}"
+  RESTART_FEATURE_SERVICE="${EXISTING_FEATURE_SERVICE}"
 }
 
 env_flag() {
@@ -150,6 +158,7 @@ wait_for_deployment_rollout_with_cleanup() {
   wait_for_resource "${namespace}" deployment "${name}" "${timeout}"
 
   deadline=$((SECONDS + timeout))
+  echo "Waiting for deployment \"${name}\" in namespace ${namespace} to become ready..."
 
   while true; do
     remaining=$((deadline - SECONDS))
@@ -180,6 +189,17 @@ wait_for_deployment_rollout_with_cleanup() {
     force_delete_terminating_pods "${namespace}" "${selector}"
     sleep 5
   done
+}
+
+should_wait_for_local_deployment() {
+  local existed_before_apply="$1"
+  local restarted="$2"
+
+  if [ "${existed_before_apply}" = "0" ] || [ "${restarted}" = "1" ]; then
+    return 0
+  fi
+
+  return 1
 }
 
 recreate_job_from_manifest() {
@@ -821,10 +841,26 @@ kubectl apply -f k8s/mealie/mealie-deployment.yaml
 
 restart_local_image_workloads
 
-wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300
-wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300 || true
-wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 300
-wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
+  wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300
+else
+  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API_CANARY}" "${RESTART_INFERENCE_API_CANARY}"; then
+  wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300 || true
+else
+  echo "Skipping inference-api-canary readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_FEATURE_SERVICE}" "${RESTART_FEATURE_SERVICE}"; then
+  wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 300
+else
+  echo "Skipping feature-service readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_MEALIE_APP}" "${RESTART_MEALIE_APP}"; then
+  wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
+else
+  echo "Skipping mealie-app readiness wait; deployment was already present and not restarted."
+fi
 
 maybe_run_bootstrap_jobs
 deploy_monitoring
