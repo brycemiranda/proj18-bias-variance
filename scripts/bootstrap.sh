@@ -18,13 +18,13 @@ require_cmd() {
 }
 
 detect_kubectl() {
-  if command -v kubectl >/dev/null 2>&1; then
-    KUBECTL_BIN=(kubectl)
+  if command -v k3s >/dev/null 2>&1; then
+    KUBECTL_BIN=(sudo k3s kubectl)
     return
   fi
 
-  if command -v k3s >/dev/null 2>&1; then
-    KUBECTL_BIN=(sudo k3s kubectl)
+  if command -v kubectl >/dev/null 2>&1; then
+    KUBECTL_BIN=(kubectl)
     return
   fi
 
