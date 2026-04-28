@@ -71,7 +71,7 @@ The script performs the full deployment:
 2. creates namespaces and secrets
 3. builds the local project images and imports them into K3s
 4. installs ArgoCD
-5. creates ArgoCD Applications for `core`, `platform`, `serving`, `data`, `training`, `mealie`, and `monitoring`
+5. creates ArgoCD Applications for `core`, `platform`, `serving`, `data`, `mealie`, and `monitoring`
 6. waits for the critical rollouts to finish
 
 Passing `<floating-ip>` is recommended so the script prints externally reachable URLs instead of the node's internal `10.x` address.
@@ -117,4 +117,5 @@ The response should show:
 ## Notes
 
 - This path is recovery-oriented. It intentionally does not run Food.com ingestion, batch bootstrap, or initial ALS retraining.
+- The recovery Argo path also excludes recurring batch/retrain/eval CronJobs so Prometheus does not alert on background jobs that are intentionally unused for persisted-state recovery.
 - If the ArgoCD path fails during grading, the imperative fallback remains `bash scripts/bootstrap.sh`.

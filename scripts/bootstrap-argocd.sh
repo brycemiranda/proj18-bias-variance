@@ -202,6 +202,20 @@ wait_for_job() {
   kubectl wait --for=condition=complete "job/${job_name}" -n "${namespace}" --timeout="${timeout}"
 }
 
+delete_jobs_by_prefix() {
+  local namespace="$1"
+  local prefix="$2"
+  local job_name
+
+  while IFS= read -r job_name; do
+    case "${job_name}" in
+      job.batch/${prefix}*)
+        kubectl delete "${job_name}" -n "${namespace}" --ignore-not-found=true >/dev/null 2>&1 || true
+        ;;
+    esac
+  done < <(kubectl get jobs -n "${namespace}" -o name 2>/dev/null || true)
+}
+
 recreate_job_from_manifest() {
   local manifest_path="$1"
   local namespace="$2"
@@ -270,6 +284,21 @@ spec:
 EOF
   wait_for_job platform "${job_name}" 240s
   kubectl delete job "${job_name}" -n platform --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+}
+
+cleanup_recovery_mode_jobs() {
+  echo "=== Cleaning recovery-mode background jobs ==="
+  kubectl delete cronjob batch-compile-datasets -n data --ignore-not-found=true >/dev/null 2>&1 || true
+  kubectl delete cronjob nightly-eval -n training --ignore-not-found=true >/dev/null 2>&1 || true
+  kubectl delete cronjob monthly-retrain -n training --ignore-not-found=true >/dev/null 2>&1 || true
+  kubectl delete cronjob model-promoter -n training --ignore-not-found=true >/dev/null 2>&1 || true
+  kubectl delete application proj18-training -n argocd --ignore-not-found=true >/dev/null 2>&1 || true
+
+  delete_jobs_by_prefix platform "postgres-bootstrap"
+  delete_jobs_by_prefix data "batch-compile-datasets-"
+  delete_jobs_by_prefix training "nightly-eval-"
+  delete_jobs_by_prefix training "monthly-retrain-"
+  delete_jobs_by_prefix training "model-promoter-"
 }
 
 open_firewall_ports() {
@@ -381,6 +410,8 @@ spec:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
     path: k8s/platform
+    directory:
+      exclude: '{postgres-bootstrap-job.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: platform
@@ -423,30 +454,11 @@ spec:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
     path: k8s/argocd/data
+    directory:
+      exclude: '{batch-compile-cronjob.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: data
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: proj18-training
-  namespace: argocd
-spec:
-  project: proj18
-  source:
-    repoURL: ${REPO_URL}
-    targetRevision: ${TARGET_REVISION}
-    path: k8s/training
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: training
   syncPolicy:
     automated:
       prune: true
@@ -504,6 +516,7 @@ wait_for_rollout platform statefulset postgres 600
 wait_for_rollout platform deployment minio 600
 bootstrap_postgres
 initialize_minio_buckets
+cleanup_recovery_mode_jobs
 wait_for_rollout platform deployment mlflow 600
 wait_for_rollout serving deployment inference-api 600
 wait_for_rollout data deployment feature-service 600
