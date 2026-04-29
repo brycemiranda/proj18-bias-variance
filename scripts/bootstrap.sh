@@ -494,6 +494,81 @@ SQL
   '
 }
 
+sync_secret_from_namespace() {
+  local source_namespace="$1"
+  local secret_name="$2"
+  local target_namespaces_csv="$3"
+  local renderer="$4"
+  local target_namespace
+
+  while IFS= read -r target_namespace; do
+    [ -n "${target_namespace}" ] || continue
+    eval "${renderer}" | kubectl apply -f -
+  done < <(echo "${target_namespaces_csv}" | tr ',' '\n')
+}
+
+sync_postgres_secret_from_platform() {
+  local username password
+  username="$(kubectl get secret postgres-secret -n platform -o go-template='{{index .data "username" | base64decode}}' 2>/dev/null || true)"
+  password="$(kubectl get secret postgres-secret -n platform -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null || true)"
+
+  if [ -z "${username}" ] || [ -z "${password}" ]; then
+    echo "Warning: unable to read platform/postgres-secret; skipping postgres secret sync."
+    return
+  fi
+
+  echo "=== Syncing postgres-secret from platform namespace to mealie/data/training ==="
+  sync_secret_from_namespace platform postgres-secret "mealie,data,training" "
+cat <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: ${target_namespace}
+type: Opaque
+stringData:
+  username: \"${username}\"
+  password: \"${password}\"
+EOF
+"
+}
+
+sync_minio_secret_from_platform() {
+  local accesskey secretkey
+  accesskey="$(kubectl get secret minio-secret -n platform -o go-template='{{index .data "accesskey" | base64decode}}' 2>/dev/null || true)"
+  secretkey="$(kubectl get secret minio-secret -n platform -o go-template='{{index .data "secretkey" | base64decode}}' 2>/dev/null || true)"
+
+  if [ -z "${accesskey}" ] || [ -z "${secretkey}" ]; then
+    echo "Warning: unable to read platform/minio-secret; skipping MinIO secret sync."
+    return
+  fi
+
+  echo "=== Syncing minio-secret from platform namespace to serving/data/training ==="
+  sync_secret_from_namespace platform minio-secret "serving,data,training" "
+cat <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: ${target_namespace}
+type: Opaque
+stringData:
+  accesskey: \"${accesskey}\"
+  secretkey: \"${secretkey}\"
+EOF
+"
+
+  if deployment_exists serving inference-api; then
+    RESTART_INFERENCE_API=1
+  fi
+  if deployment_exists serving inference-api-canary; then
+    RESTART_INFERENCE_API_CANARY=1
+  fi
+  if deployment_exists data feature-service; then
+    RESTART_FEATURE_SERVICE=1
+  fi
+}
+
 postgres_query_scalar() {
   local db="$1"
   local sql="$2"
@@ -907,8 +982,10 @@ bootstrap_postgres
 reconcile_postgres_role_password
 restore_postgres_mlflow_snapshot_if_needed
 reconcile_postgres_role_password
+sync_postgres_secret_from_platform
 
 initialize_minio_buckets
+sync_minio_secret_from_platform
 seed_minio_from_chameleon_backup
 
 echo "=== Deploying MLflow ==="
