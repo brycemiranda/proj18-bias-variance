@@ -52,7 +52,18 @@ def already_ingested(client) -> bool:
     except Exception:
         return False
 
+def setup_kaggle_creds():
+    token = os.environ.get('KAGGLE_TOKEN', '').strip()
+    if not token:
+        return
+    kaggle_dir = os.path.expanduser('~/.kaggle')
+    os.makedirs(kaggle_dir, exist_ok=True)
+    with open(os.path.join(kaggle_dir, 'kaggle.json'), 'w') as f:
+        f.write(token)
+    os.chmod(os.path.join(kaggle_dir, 'kaggle.json'), 0o600)
+
 def download():
+    setup_kaggle_creds()
     print("Downloading Food.com from Kaggle...")
     os.makedirs(DATA_DIR, exist_ok=True)
     subprocess.run(['kaggle', 'datasets', 'download',

@@ -907,7 +907,7 @@ build_and_import "proj18biasvariance/mealie-feature-service:local" "data/feature
 build_and_import "proj18biasvariance/batch-compile-datasets:local" "data/batch/Dockerfile" "data/batch"
 build_and_import "proj18biasvariance/mealie-als-training:local" "training/Dockerfile" "training"
 build_and_import "proj18biasvariance/mealie-nightly-eval:local" "data/nightly_eval/Dockerfile" "data/nightly_eval"
-build_and_import "proj18biasvariance/mealie-ingest:local" "data/Dockerfile" "data"
+build_and_import "proj18biasvariance/mealie-ingest:local" "data/ingestion/Dockerfile" "data/ingestion"
 
 echo "=== Installing ArgoCD ==="
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
