@@ -516,8 +516,8 @@ metadata:
   namespace: ${target_namespace}
 type: Opaque
 stringData:
-  username: \"${username}\"
-  password: \"${password}\"
+  username: "${username}"
+  password: "${password}"
 EOF
   done < <(printf '%s\n' mealie data training)
 }
@@ -544,8 +544,8 @@ metadata:
   namespace: ${target_namespace}
 type: Opaque
 stringData:
-  accesskey: \"${accesskey}\"
-  secretkey: \"${secretkey}\"
+  accesskey: "${accesskey}"
+  secretkey: "${secretkey}"
 EOF
   done < <(printf '%s\n' serving data training)
 
