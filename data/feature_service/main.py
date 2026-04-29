@@ -427,6 +427,12 @@ def discovery(
             page_df     = df.iloc[start:end]
             score_slice = None
 
+    if score_slice is not None and len(score_slice) > 1:
+        max_s = max(score_slice)
+        min_s = min(score_slice)
+        if max_s - min_s > 1e-4:
+            score_slice = [(s - min_s) / (max_s - min_s) for s in score_slice]
+
     items = []
     for i, (_, row) in enumerate(page_df.iterrows()):
         items.append({
@@ -439,7 +445,6 @@ def discovery(
             "steps":       row['steps'],
             "score":       float(score_slice[i]) if score_slice is not None else 0.0,
         })
-
 
     return {"items": items, "page": page, "total": total, "cold_start": cold_start}
 

@@ -124,4 +124,12 @@ def rank_recipes(
         scored[: max(top_n * 2, 20)],
         limit=top_n,
     )
+
+    if len(diversified) > 1:
+        max_s = max(r["score"] for r in diversified)
+        min_s = min(r["score"] for r in diversified)
+        if max_s - min_s > 1e-4:
+            for r in diversified:
+                r["score"] = round((r["score"] - min_s) / (max_s - min_s), 4)
+
     return [{"rank": idx + 1, **recipe} for idx, recipe in enumerate(diversified)]
