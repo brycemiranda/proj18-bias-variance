@@ -272,6 +272,24 @@ def get_user_vector(user_id: str) -> Optional[list]:
     return None
 
 
+def get_dismissed_recipe_ids(user_id: str) -> set[str]:
+    try:
+        with pg() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT recipe_id
+                    FROM mealie_events
+                    WHERE user_id = %s AND event_type = 'dismiss'
+                    """,
+                    (user_id,),
+                )
+                return {str(row[0]) for row in cur.fetchall() if row and row[0]}
+    except Exception as e:
+        log.warning(f"Failed to fetch dismissed recipes for {user_id}: {e}")
+    return set()
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 class RecommendRequest(BaseModel):
     user_id: str
@@ -375,6 +393,15 @@ def discovery(
     else:
         df = _discovery_df
         norm_vectors = _recipe_vectors_norm
+
+    dismissed_recipe_ids = get_dismissed_recipe_ids(user_id)
+    if dismissed_recipe_ids:
+        dismissed_mask = ~df["recipe_id"].isin(dismissed_recipe_ids).values
+        df = df[dismissed_mask]
+        norm_vectors = norm_vectors[dismissed_mask]
+
+    if df.empty:
+        return {"items": [], "page": page, "total": 0, "cold_start": get_user_vector(user_id) is None}
 
     user_vec = get_user_vector(user_id)
     cold_start = user_vec is None
