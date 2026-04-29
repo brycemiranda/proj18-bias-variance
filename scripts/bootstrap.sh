@@ -1006,7 +1006,8 @@ else
   echo "Skipping mealie-app readiness wait; deployment was already present and not restarted."
 fi
 if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
-  if ! wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300; then
+  echo "Checking inference-api readiness for up to 60s. Continuing if the restored model artifact is still invalid."
+  if ! wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 60; then
     echo "Warning: inference-api did not become ready during bootstrap."
     echo "The Mealie discovery feed can still work if feature-service loaded the restored parquet."
     echo "Inference will remain degraded until a valid tag_to_vector.pkl is restored or regenerated."
@@ -1015,7 +1016,7 @@ else
   echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
 fi
 if should_wait_for_local_deployment "${EXISTING_INFERENCE_API_CANARY}" "${RESTART_INFERENCE_API_CANARY}"; then
-  if ! wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300; then
+  if ! wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 60; then
     echo "Warning: inference-api-canary did not become ready during bootstrap."
   fi
 else
