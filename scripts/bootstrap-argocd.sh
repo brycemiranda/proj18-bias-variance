@@ -6,8 +6,11 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
 EXPLICIT_HOST_IP="${1:-${FLOATING_IP:-${HOST_IP:-}}}"
-SECRETS_FILE="${SECRETS_FILE:-scripts/secrets.env}"
 BLOCK_MOUNT_DIR="${BLOCK_MOUNT:-/mnt/block}"
+SECRETS_FILE="${SECRETS_FILE:-${BLOCK_MOUNT_DIR}/bootstrap/secrets.env}"
+if [ ! -f "${SECRETS_FILE}" ]; then
+  SECRETS_FILE="scripts/secrets.env"
+fi
 K8S_STORAGE_DIR="${BLOCK_MOUNT_DIR}/k8s-storage/storage"
 RESTART_LOCAL_WORKLOADS="${RESTART_LOCAL_WORKLOADS:-0}"
 RESTART_MEALIE_APP_ON_RERUN="${RESTART_MEALIE_APP_ON_RERUN:-0}"
