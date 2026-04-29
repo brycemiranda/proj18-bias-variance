@@ -58,18 +58,56 @@ spec:
                   key: password
             - name: POSTGRES_DB
               value: mealie
-            - name: AWS_ACCESS_KEY_ID
+            - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: accesskey
-            - name: AWS_SECRET_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-secret
                   key: secretkey
-            - name: S3_ENDPOINT_URL
+            - name: MINIO_ENDPOINT
               value: http://minio-service.platform.svc.cluster.local:9000
+            - name: MINIO_BUCKET
+              value: mlflow-artifacts
+            - name: CHAMELEON_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: CHAMELEON_ENDPOINT
+                  optional: true
+            - name: CHAMELEON_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: CHAMELEON_ACCESS_KEY
+                  optional: true
+            - name: CHAMELEON_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: CHAMELEON_SECRET_KEY
+                  optional: true
+            - name: CHAMELEON_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: CHAMELEON_BUCKET
+                  optional: true
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: HF_TOKEN
+                  optional: true
+            - name: HF_REPO
+              valueFrom:
+                secretKeyRef:
+                  name: artifact-restore-secret
+                  key: HF_REPO
+                  optional: true
           resources:
             requests:
               cpu: "50m"
