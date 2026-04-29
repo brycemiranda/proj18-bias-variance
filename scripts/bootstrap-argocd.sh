@@ -1125,6 +1125,8 @@ wait_for_rollout monitoring deployment grafana 600
 
 open_firewall_ports
 
+if env_flag "${RUN_BOOTSTRAP_ML_PIPELINE:-0}"; then
+
 # ─── ML pipeline: ingest → batch → train → promote ─────────────────────────────
 echo
 echo "=== Running ML pipeline (ingest → batch → train → promote) ==="
@@ -1181,6 +1183,7 @@ else
   echo "Services restarted and loading new model."
 fi
 echo
+fi
 
 echo "=== Cluster summary ==="
 kubectl get applications -n argocd
