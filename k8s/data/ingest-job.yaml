@@ -32,6 +32,7 @@ spec:
                 secretKeyRef:
                   name: kaggle-secret
                   key: token
+                  optional: true
             - name: FORCE_INGEST
               value: "0"
           resources:

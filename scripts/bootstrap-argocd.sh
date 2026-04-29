@@ -907,6 +907,7 @@ build_and_import "proj18biasvariance/mealie-feature-service:local" "data/feature
 build_and_import "proj18biasvariance/batch-compile-datasets:local" "data/batch/Dockerfile" "data/batch"
 build_and_import "proj18biasvariance/mealie-als-training:local" "training/Dockerfile" "training"
 build_and_import "proj18biasvariance/mealie-nightly-eval:local" "data/nightly_eval/Dockerfile" "data/nightly_eval"
+build_and_import "proj18biasvariance/mealie-ingest:local" "data/Dockerfile" "data"
 
 echo "=== Installing ArgoCD ==="
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
@@ -1128,16 +1129,18 @@ echo "=== Running ML pipeline (ingest → batch → train → promote) ==="
 if kubectl exec -n platform deploy/minio -- mc stat local/mlflow-artifacts/production/tag_to_vector.pkl >/dev/null 2>&1; then
   echo "Production model already exists — skipping pipeline run."
 else
-  echo "[1/4] Waiting for ingest job to complete (~15 min) ..."
-  kubectl wait --for=condition=complete job/ingest-run -n data --timeout=1800s || {
-    echo "WARNING: ingest-run did not complete in 30 min."
+  echo "[1/4] Waiting for ingest job to complete (~15 min, skipped if data already in MinIO) ..."
+  if kubectl exec -n platform deploy/minio -- mc stat local/training-data/processed/recipes_clean.parquet >/dev/null 2>&1; then
+    echo "[1/4] recipes_clean.parquet already in MinIO — skipping ingest wait."
+  else
+    kubectl wait --for=condition=complete job/ingest-run -n data --timeout=1800s || true
     if ! kubectl exec -n platform deploy/minio -- mc stat local/training-data/processed/recipes_clean.parquet >/dev/null 2>&1; then
-      echo "ERROR: ingest failed and no data in MinIO. Check: kubectl logs -n data job/ingest-run"
-      exit 1
+      echo "WARNING: ingest did not populate MinIO. Batch and training may fail."
+      echo "  To run manually: kubectl create job ingest-manual --from=cronjob/ingest -n data (if using KAGGLE_TOKEN)"
+      echo "  Or restore data from Chameleon backup via CHAMELEON_* env vars in secrets.env"
     fi
-    echo "Data already present in MinIO — continuing."
-  }
-  echo "[1/4] Ingest complete."
+  fi
+  echo "[1/4] Ingest step done."
 
   echo "[2/4] Running batch job (~5 min) ..."
   kubectl delete job batch-bootstrap -n data --ignore-not-found=true
