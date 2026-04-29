@@ -1121,6 +1121,61 @@ wait_for_rollout monitoring deployment grafana 600
 
 open_firewall_ports
 
+# ─── ML pipeline: ingest → batch → train → promote ─────────────────────────────
+echo
+echo "=== Running ML pipeline (ingest → batch → train → promote) ==="
+
+if kubectl exec -n platform deploy/minio -- mc stat local/mlflow-artifacts/production/tag_to_vector.pkl >/dev/null 2>&1; then
+  echo "Production model already exists — skipping pipeline run."
+else
+  echo "[1/4] Waiting for ingest job to complete (~15 min) ..."
+  kubectl wait --for=condition=complete job/ingest-run -n data --timeout=1800s || {
+    echo "WARNING: ingest-run did not complete in 30 min."
+    if ! kubectl exec -n platform deploy/minio -- mc stat local/training-data/processed/recipes_clean.parquet >/dev/null 2>&1; then
+      echo "ERROR: ingest failed and no data in MinIO. Check: kubectl logs -n data job/ingest-run"
+      exit 1
+    fi
+    echo "Data already present in MinIO — continuing."
+  }
+  echo "[1/4] Ingest complete."
+
+  echo "[2/4] Running batch job (~5 min) ..."
+  kubectl delete job batch-bootstrap -n data --ignore-not-found=true
+  kubectl create job --from=cronjob/batch-compile-datasets batch-bootstrap -n data
+  kubectl wait --for=condition=complete job/batch-bootstrap -n data --timeout=600s || {
+    echo "ERROR: batch job did not complete in 10 min. Check: kubectl logs -n data job/batch-bootstrap"
+    exit 1
+  }
+  echo "[2/4] Batch complete."
+
+  echo "[3/4] Running training job (~30 min) ..."
+  kubectl delete job train-bootstrap -n training --ignore-not-found=true
+  kubectl create job --from=cronjob/monthly-retrain train-bootstrap -n training
+  kubectl wait --for=condition=complete job/train-bootstrap -n training --timeout=3600s || {
+    echo "ERROR: training job did not complete in 60 min. Check: kubectl logs -n training job/train-bootstrap"
+    exit 1
+  }
+  echo "[3/4] Training complete."
+
+  echo "[4/4] Promoting staging → production ..."
+  kubectl exec -n platform deploy/minio -- \
+    mc cp local/mlflow-artifacts/staging/tag_to_vector.pkl \
+         local/mlflow-artifacts/production/tag_to_vector.pkl
+  kubectl exec -n platform deploy/minio -- \
+    mc cp local/mlflow-artifacts/staging/tag_to_vector.pkl \
+         local/mlflow-artifacts/production/tag_to_vector.pkl.bak
+  echo "[4/4] Model promoted to production."
+
+  echo "Restarting services to load new model ..."
+  kubectl rollout restart deployment/feature-service -n data
+  kubectl rollout restart deployment/inference-api -n serving
+  kubectl rollout restart deployment/inference-api-canary -n serving 2>/dev/null || true
+  kubectl rollout status deployment/feature-service -n data --timeout=180s || true
+  kubectl rollout status deployment/inference-api -n serving --timeout=180s || true
+  echo "Services restarted and loading new model."
+fi
+echo
+
 echo "=== Cluster summary ==="
 kubectl get applications -n argocd
 kubectl get pods -A -o wide
