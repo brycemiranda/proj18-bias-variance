@@ -544,21 +544,9 @@ SQL
   '
 }
 
-sync_secret_from_namespace() {
-  local source_namespace="$1"
-  local secret_name="$2"
-  local target_namespaces_csv="$3"
-  local renderer="$4"
-  local target_namespace
-
-  while IFS= read -r target_namespace; do
-    [ -n "${target_namespace}" ] || continue
-    eval "${renderer}" | kubectl apply -f -
-  done < <(echo "${target_namespaces_csv}" | tr ',' '\n')
-}
-
 sync_postgres_secret_from_platform() {
   local username password
+  local target_namespace
   username="$(kubectl get secret postgres-secret -n platform -o go-template='{{index .data "username" | base64decode}}' 2>/dev/null || true)"
   password="$(kubectl get secret postgres-secret -n platform -o go-template='{{index .data "password" | base64decode}}' 2>/dev/null || true)"
 
@@ -568,8 +556,9 @@ sync_postgres_secret_from_platform() {
   fi
 
   echo "=== Syncing postgres-secret from platform namespace to mealie/data/training ==="
-  sync_secret_from_namespace platform postgres-secret "mealie,data,training" "
-cat <<EOF
+  while IFS= read -r target_namespace; do
+    [ -n "${target_namespace}" ] || continue
+    cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
@@ -580,11 +569,12 @@ stringData:
   username: \"${username}\"
   password: \"${password}\"
 EOF
-"
+  done < <(printf '%s\n' mealie data training)
 }
 
 sync_minio_secret_from_platform() {
   local accesskey secretkey
+  local target_namespace
   accesskey="$(kubectl get secret minio-secret -n platform -o go-template='{{index .data "accesskey" | base64decode}}' 2>/dev/null || true)"
   secretkey="$(kubectl get secret minio-secret -n platform -o go-template='{{index .data "secretkey" | base64decode}}' 2>/dev/null || true)"
 
@@ -594,8 +584,9 @@ sync_minio_secret_from_platform() {
   fi
 
   echo "=== Syncing minio-secret from platform namespace to serving/data/training ==="
-  sync_secret_from_namespace platform minio-secret "serving,data,training" "
-cat <<EOF
+  while IFS= read -r target_namespace; do
+    [ -n "${target_namespace}" ] || continue
+    cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
@@ -606,7 +597,7 @@ stringData:
   accesskey: \"${accesskey}\"
   secretkey: \"${secretkey}\"
 EOF
-"
+  done < <(printf '%s\n' serving data training)
 
   if deployment_exists serving inference-api; then
     RESTART_INFERENCE_API=1
