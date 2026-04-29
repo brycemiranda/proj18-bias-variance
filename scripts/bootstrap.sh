@@ -171,7 +171,7 @@ wait_for_deployment_rollout_with_cleanup() {
       echo "Error: deployment/${name} in namespace ${namespace} did not finish rolling out within ${timeout}s."
       kubectl get pods -n "${namespace}" -l "${selector}" -o wide || true
       kubectl describe deployment "${name}" -n "${namespace}" || true
-      exit 1
+      return 1
     fi
 
     spec_replicas="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
@@ -995,16 +995,6 @@ kubectl apply -f k8s/mealie/mealie-deployment.yaml
 
 restart_local_image_workloads
 
-if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
-  wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300
-else
-  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
-fi
-if should_wait_for_local_deployment "${EXISTING_INFERENCE_API_CANARY}" "${RESTART_INFERENCE_API_CANARY}"; then
-  wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300 || true
-else
-  echo "Skipping inference-api-canary readiness wait; deployment was already present and not restarted."
-fi
 if should_wait_for_local_deployment "${EXISTING_FEATURE_SERVICE}" "${RESTART_FEATURE_SERVICE}"; then
   wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 300
 else
@@ -1014,6 +1004,22 @@ if should_wait_for_local_deployment "${EXISTING_MEALIE_APP}" "${RESTART_MEALIE_A
   wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
 else
   echo "Skipping mealie-app readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
+  if ! wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 300; then
+    echo "Warning: inference-api did not become ready during bootstrap."
+    echo "The Mealie discovery feed can still work if feature-service loaded the restored parquet."
+    echo "Inference will remain degraded until a valid tag_to_vector.pkl is restored or regenerated."
+  fi
+else
+  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API_CANARY}" "${RESTART_INFERENCE_API_CANARY}"; then
+  if ! wait_for_deployment_rollout_with_cleanup serving inference-api-canary app=inference-api-canary 300; then
+    echo "Warning: inference-api-canary did not become ready during bootstrap."
+  fi
+else
+  echo "Skipping inference-api-canary readiness wait; deployment was already present and not restarted."
 fi
 
 maybe_run_bootstrap_jobs

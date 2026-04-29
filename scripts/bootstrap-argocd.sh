@@ -461,7 +461,7 @@ wait_for_deployment_rollout_with_cleanup() {
       echo "Error: deployment/${name} in namespace ${namespace} did not finish rolling out within ${timeout}s."
       kubectl get pods -n "${namespace}" -l "${selector}" -o wide || true
       kubectl describe deployment "${name}" -n "${namespace}" || true
-      exit 1
+      return 1
     fi
 
     spec_replicas="$(kubectl get deployment "${name}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
@@ -1096,11 +1096,6 @@ seed_minio_from_chameleon_backup
 cleanup_recovery_mode_jobs
 restart_local_image_workloads
 wait_for_rollout platform deployment mlflow 600
-if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
-  wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 600
-else
-  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
-fi
 if should_wait_for_local_deployment "${EXISTING_FEATURE_SERVICE}" "${RESTART_FEATURE_SERVICE}"; then
   wait_for_deployment_rollout_with_cleanup data feature-service app=feature-service 600
 else
@@ -1110,6 +1105,15 @@ if should_wait_for_local_deployment "${EXISTING_MEALIE_APP}" "${RESTART_MEALIE_A
   wait_for_deployment_rollout_with_cleanup mealie mealie-app app=mealie-app 600
 else
   echo "Skipping mealie-app readiness wait; deployment was already present and not restarted."
+fi
+if should_wait_for_local_deployment "${EXISTING_INFERENCE_API}" "${RESTART_INFERENCE_API}"; then
+  if ! wait_for_deployment_rollout_with_cleanup serving inference-api app=inference-api 600; then
+    echo "Warning: inference-api did not become ready during bootstrap."
+    echo "The Mealie discovery feed can still work if feature-service loaded the restored parquet."
+    echo "Inference will remain degraded until a valid tag_to_vector.pkl is restored or regenerated."
+  fi
+else
+  echo "Skipping inference-api readiness wait; deployment was already present and not restarted."
 fi
 wait_for_rollout monitoring deployment prometheus 600
 wait_for_rollout monitoring deployment grafana 600
